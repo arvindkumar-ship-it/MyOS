@@ -8,7 +8,11 @@ void test_boot(void);
 void test_kprintf(void);
 void test_panic(void);
 
+// Stage 3
+void test_gdt(void);
+
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
-    { "panic",   test_panic },
+    { "panic",   test_panic }, \
+    { "gdt",     test_gdt },

@@ -9,6 +9,7 @@
 #include "lib/kprintf.h"
 #include "lib/panic.h"
 #include "arch/x86_64/cpu.h"
+#include "arch/x86_64/gdt.h"
 #include "tests/ktest.h"
 
 // Kernel entry point. Limine jumps here in 64-bit long mode,
@@ -40,6 +41,10 @@ void kmain(void) {
     kprintf("console ready\n");
 
     kprintf("Hello from MyOS\n");
+
+    // Stage 3: our own GDT + TSS, then the IDT so CPU exceptions are caught.
+    gdt_init();
+    kprintf("GDT + TSS loaded\n");
 
     // Automatic tests (only when booted with "test=...").
     ktest_run();

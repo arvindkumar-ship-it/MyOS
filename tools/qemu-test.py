@@ -61,6 +61,10 @@ TESTS = [
         ("expect", "test 42"),
         ("expect", "System halted."),
     ], exit=5),
+
+    # Stage 3: our GDT and TSS are loaded.
+    dict(name="gdt", steps=[("expect", "GDT + TSS loaded"), ("expect", "cs=8 ss=10 ds=10 tr=28"),
+                            ("expect", "TEST PASS: gdt")], forbid=[PANIC_RE], exit=3),
 ]
 
 # ---------------------------------------------------------------------------
