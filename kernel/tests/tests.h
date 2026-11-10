@@ -17,6 +17,10 @@ void test_pf(void);
 void test_df(void);
 void test_ud(void);
 
+// Stage 4
+void test_timer(void);
+void test_readline(void);
+
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
@@ -27,4 +31,7 @@ void test_ud(void);
     { "gp",      test_gp }, \
     { "pf",      test_pf }, \
     { "df",      test_df }, \
-    { "ud",      test_ud },
+    { "ud",      test_ud }, \
+    { "timer",   test_timer }, \
+    { "keyboard", test_readline }, \
+    { "serialin", test_readline },

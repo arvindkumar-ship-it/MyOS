@@ -34,6 +34,8 @@ LOG_DIR = os.path.join(ROOT, "build", "test-logs")
 #   ("keys", "text")         type text on the PS/2 keyboard (QEMU sendkey)
 #   ("serial", "text")       send text to the serial port (COM1 input)
 #   ("sleep", seconds)
+#   ("mark", None)           remember the current time
+#   ("elapsed", (lo, hi))    seconds since "mark" must be in [lo, hi]
 # "forbid": regexes that must never appear on serial.
 # "exit": expected QEMU exit status (3 = ktest_finish(true), 5 = panic/fail), or None.
 # ---------------------------------------------------------------------------
@@ -103,6 +105,31 @@ TESTS = [
         ("expect", "Invalid opcode at RIP="),
         ("expect", "unhandled CPU exception 6"),
     ], forbid=[r"TEST PASS"], exit=5),
+
+    # Stage 4: PIT at 100 Hz: 200 ticks must take about 2 real seconds.
+    dict(name="timer", steps=[
+        ("expect", "interrupts enabled"),
+        ("expect", "ticks=100"), ("mark", None),
+        ("expect", "ticks=300"), ("elapsed", (1.6, 2.6)),
+        ("expect", "pit_sleep_ms(500) took"),
+        ("expect", "TEST PASS: timer"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    # Stage 4 Done test: typing on the PS/2 keyboard shows up (shift, backspace too).
+    dict(name="keyboard", steps=[
+        ("expect", "type a line:"),
+        ("keys", "Hello, Worlx\bd! (1+1=2)\n"),
+        ("expect", "got line: 'Hello, World! (1+1=2)'"),
+        ("expect", "TEST PASS: keyboard"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    # Serial input (COM1 IRQ 4) goes to the same queue.
+    dict(name="serialin", steps=[
+        ("expect", "type a line:"),
+        ("serial", "echo from serial\r"),
+        ("expect", "got line: 'echo from serial'"),
+        ("expect", "TEST PASS: serialin"),
+    ], forbid=[PANIC_RE], exit=3),
 ]
 
 # ---------------------------------------------------------------------------
@@ -230,6 +257,7 @@ def run_test(t):
     q = Qemu(name)
     deadline = time.time() + timeout
     pos = 0          # serial text before this index is already "used"
+    mark = time.time()
     error = None
 
     try:
@@ -262,6 +290,13 @@ def run_test(t):
                 q.send_serial(arg)
             elif kind == "sleep":
                 time.sleep(arg)
+            elif kind == "mark":
+                mark = time.time()
+            elif kind == "elapsed":
+                took = time.time() - mark
+                if not (arg[0] <= took <= arg[1]):
+                    error = "elapsed %.2fs, expected %.1f-%.1fs" % (took, arg[0], arg[1])
+                    break
             else:
                 raise ValueError("bad step " + kind)
 

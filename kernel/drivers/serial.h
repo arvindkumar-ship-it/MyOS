@@ -13,3 +13,7 @@ void serial_putc(char c);
 
 // Send a NUL-terminated string.
 void serial_write(const char *s);
+
+// Turn on the "data received" interrupt (IRQ 4): typed characters go to the
+// input queue (drivers/input.h). Call after irq_init().
+void serial_enable_rx_irq(void);

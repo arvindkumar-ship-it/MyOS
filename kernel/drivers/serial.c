@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include "arch/x86_64/io.h"
+#include "arch/x86_64/irq.h"
+#include "drivers/input.h"
 
 // I/O port base address of COM1.
 #define COM1 0x3F8
@@ -17,6 +19,10 @@
 #define REG_LINE_STATUS 5
 
 #define LINE_STATUS_TX_EMPTY 0x20   // bit 5: ready to accept a new byte
+#define LINE_STATUS_DATA_READY 0x01 // bit 0: a received byte is waiting
+#define INT_ENABLE_RX 0x01          // interrupt when a byte arrives
+
+#define COM1_IRQ 4
 
 static bool serial_ok = false;
 
@@ -61,4 +67,29 @@ void serial_write(const char *s) {
     while (*s) {
         serial_putc(*s++);
     }
+}
+
+static void serial_irq(struct interrupt_frame *frame) {
+    (void)frame;
+    // Read every byte the FIFO holds (several may have arrived).
+    while (inb(COM1 + REG_LINE_STATUS) & LINE_STATUS_DATA_READY) {
+        char c = (char)inb(COM1 + REG_DATA);
+        // Terminals send Enter as '\r' and Backspace as DEL (0x7F).
+        if (c == '\r') {
+            c = '\n';
+        } else if (c == 0x7F) {
+            c = '\b';
+        }
+        input_push(c);
+    }
+}
+
+void serial_enable_rx_irq(void) {
+    if (!serial_ok) {
+        return;
+    }
+    irq_register(COM1_IRQ, serial_irq);
+    // OUT2 (bit 3 of modem control, set in serial_init) must be on: on PCs it
+    // connects the UART interrupt line to the PIC.
+    outb(COM1 + REG_INT_ENABLE, INT_ENABLE_RX);
 }

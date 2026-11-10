@@ -11,7 +11,33 @@
 #include "arch/x86_64/cpu.h"
 #include "arch/x86_64/gdt.h"
 #include "arch/x86_64/interrupts.h"
+#include "arch/x86_64/irq.h"
+#include "drivers/pit.h"
+#include "drivers/keyboard.h"
+#include "drivers/input.h"
 #include "tests/ktest.h"
+
+// Stage 4 demo: echo typed characters (keyboard or serial) and show the
+// tick counter in the status bar, updated once per second.
+__attribute__((noreturn))
+static void stage4_echo_loop(void) {
+    kprintf("Type something (keyboard or serial):\n");
+    uint64_t last_shown = (uint64_t)-1;
+    for (;;) {
+        uint64_t t = pit_ticks();
+        if (t / PIT_HZ != last_shown) {
+            last_shown = t / PIT_HZ;
+            char status[64];
+            ksnprintf(status, sizeof(status), "ticks: %lu  uptime: %lus ", t, last_shown);
+            console_set_status(status);
+        }
+        char c;
+        while (input_try_getc(&c)) {
+            kprintf("%c", c);
+        }
+        cpu_hlt();   // sleep until the next IRQ (timer, key, serial)
+    }
+}
 
 // Kernel entry point. Limine jumps here in 64-bit long mode,
 // with paging on and the kernel mapped at 0xffffffff80000000.
@@ -28,6 +54,7 @@ void kmain(void) {
     kprintf("HHDM offset: %p\n", (void *)boot_info.hhdm_offset);
     kprintf("kernel: phys %p -> virt %p\n",
             (void *)boot_info.kernel_phys_base, (void *)boot_info.kernel_virt_base);
+    boot_print_memmap();
 
     struct limine_framebuffer *limine_fb = boot_info.framebuffer;
     if (!fb_init(limine_fb)) {
@@ -49,9 +76,16 @@ void kmain(void) {
     interrupts_init();
     kprintf("IDT loaded (256 vectors)\n");
 
+    // Stage 4: hardware interrupts. PIC remap -> IRQ 0-15 = vectors 32-47.
+    irq_init();
+    pit_init();
+    keyboard_init();
+    serial_enable_rx_irq();
+    cpu_sti();   // from here on, IRQs arrive
+    kprintf("PIC remapped, PIT at %d Hz, keyboard + serial input on, interrupts enabled\n", PIT_HZ);
+
     // Automatic tests (only when booted with "test=...").
     ktest_run();
 
-    // Nothing more to do yet.
-    halt_forever();
+    stage4_echo_loop();
 }
