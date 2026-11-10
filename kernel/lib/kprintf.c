@@ -4,24 +4,43 @@
 #include <stdbool.h>
 #include "drivers/serial.h"
 #include "drivers/console.h"
+#include "arch/x86_64/cpu.h"
+
+// The formatter writes through a "struct out", so the same code can print
+// to the screen/serial (kprintf) or into a buffer (ksnprintf).
+struct out {
+    void (*putc)(struct out *o, char c);
+    char *buf;      // ksnprintf only
+    size_t size;
+    size_t len;     // characters produced so far (also counts ones that did not fit)
+};
 
 // Send one character everywhere we can show text.
-static void kputc(char c) {
+static void screen_putc(struct out *o, char c) {
+    o->len++;
     serial_putc(c);
     if (console_is_ready()) {
         console_putc(c);
     }
 }
 
-static void kputs(const char *s) {
+static void buffer_putc(struct out *o, char c) {
+    // Keep one byte free for the final '\0'.
+    if (o->len + 1 < o->size) {
+        o->buf[o->len] = c;
+    }
+    o->len++;
+}
+
+static void out_str(struct out *o, const char *s) {
     while (*s) {
-        kputc(*s++);
+        o->putc(o, *s++);
     }
 }
 
 // Print an unsigned number in base 10 or 16.
 // width: minimum number of characters; pad: '0' or ' ' to fill the gap.
-static void print_unsigned(uint64_t value, unsigned base, bool upper,
+static void print_unsigned(struct out *o, uint64_t value, unsigned base, bool upper,
                            int width, char pad) {
     const char *digits = upper ? "0123456789ABCDEF" : "0123456789abcdef";
     char buf[20];   // 2^64 - 1 has 20 decimal digits (and 16 hex digits)
@@ -35,14 +54,14 @@ static void print_unsigned(uint64_t value, unsigned base, bool upper,
     } while (value != 0);
 
     for (int i = len; i < width; i++) {
-        kputc(pad);
+        o->putc(o, pad);
     }
     while (len > 0) {
-        kputc(buf[--len]);
+        o->putc(o, buf[--len]);
     }
 }
 
-static void print_signed(int64_t value, int width, char pad) {
+static void print_signed(struct out *o, int64_t value, int width, char pad) {
     uint64_t magnitude;
     if (value < 0) {
         // Do not write -value: for INT64_MIN that overflows (undefined).
@@ -50,8 +69,8 @@ static void print_signed(int64_t value, int width, char pad) {
         magnitude = -(uint64_t)value;
         if (pad == '0') {
             // "-0042", not "00-42": sign goes before the zeros.
-            kputc('-');
-            print_unsigned(magnitude, 10, false, width - 1, pad);
+            o->putc(o, '-');
+            print_unsigned(o, magnitude, 10, false, width - 1, pad);
             return;
         }
         // "  -42": spaces, then sign, then digits. Count digits for the padding.
@@ -60,28 +79,36 @@ static void print_signed(int64_t value, int width, char pad) {
             digits++;
         }
         for (int i = digits + 1; i < width; i++) {
-            kputc(' ');
+            o->putc(o, ' ');
         }
-        kputc('-');
-        print_unsigned(magnitude, 10, false, 0, ' ');
+        o->putc(o, '-');
+        print_unsigned(o, magnitude, 10, false, 0, ' ');
         return;
     }
-    print_unsigned((uint64_t)value, 10, false, width, pad);
+    print_unsigned(o, (uint64_t)value, 10, false, width, pad);
 }
 
-void kvprintf(const char *fmt, va_list args) {
+static void format(struct out *o, const char *fmt, va_list args) {
     for (const char *p = fmt; *p != '\0'; p++) {
         if (*p != '%') {
-            kputc(*p);
+            o->putc(o, *p);
             continue;
         }
         p++;   // skip '%'
 
-        // Flag: leading 0 means pad with zeros.
+        // Flags: '0' pads with zeros, '-' aligns left (pads on the right).
         char pad = ' ';
-        if (*p == '0') {
-            pad = '0';
-            p++;
+        bool left = false;
+        for (;;) {
+            if (*p == '0') {
+                pad = '0';
+                p++;
+            } else if (*p == '-') {
+                left = true;
+                p++;
+            } else {
+                break;
+            }
         }
 
         // Width: decimal number.
@@ -104,49 +131,76 @@ void kvprintf(const char *fmt, va_list args) {
         case 'i': {
             // va_arg must use the exact type that was passed.
             int64_t v = is_long ? va_arg(args, long) : va_arg(args, int);
-            print_signed(v, width, pad);
+            print_signed(o, v, width, pad);
             break;
         }
         case 'u': {
             uint64_t v = is_long ? va_arg(args, unsigned long) : va_arg(args, unsigned int);
-            print_unsigned(v, 10, false, width, pad);
+            print_unsigned(o, v, 10, false, width, pad);
             break;
         }
         case 'x':
         case 'X': {
             uint64_t v = is_long ? va_arg(args, unsigned long) : va_arg(args, unsigned int);
-            print_unsigned(v, 16, *p == 'X', width, pad);
+            print_unsigned(o, v, 16, *p == 'X', width, pad);
             break;
         }
         case 'p': {
             // Pointers: always 0x + 16 hex digits, so addresses line up.
             uintptr_t v = (uintptr_t)va_arg(args, void *);
-            kputs("0x");
-            print_unsigned(v, 16, false, 16, '0');
+            out_str(o, "0x");
+            print_unsigned(o, v, 16, false, 16, '0');
             break;
         }
         case 's': {
             const char *s = va_arg(args, const char *);
-            kputs(s ? s : "(null)");
+            if (s == NULL) {
+                s = "(null)";
+            }
+            int len = 0;
+            while (s[len] != '\0') {
+                len++;
+            }
+            if (!left) {
+                for (int i = len; i < width; i++) {
+                    o->putc(o, ' ');
+                }
+            }
+            out_str(o, s);
+            if (left) {
+                for (int i = len; i < width; i++) {
+                    o->putc(o, ' ');
+                }
+            }
             break;
         }
         case 'c':
             // char is promoted to int when passed through "...".
-            kputc((char)va_arg(args, int));
+            o->putc(o, (char)va_arg(args, int));
             break;
         case '%':
-            kputc('%');
+            o->putc(o, '%');
             break;
         case '\0':
             // Format string ended right after '%'. Stop, do not read past the end.
             return;
         default:
             // Unknown specifier: print it as-is so the mistake is visible.
-            kputc('%');
-            kputc(*p);
+            o->putc(o, '%');
+            o->putc(o, *p);
             break;
         }
     }
+}
+
+void kvprintf(const char *fmt, va_list args) {
+    struct out o = { .putc = screen_putc };
+    // Interrupts off while printing, so a message from an interrupt handler
+    // or another task (Stage 6) cannot land in the middle of this one and
+    // the console cursor is never updated by two printers at once.
+    bool was_enabled = cpu_irq_save();
+    format(&o, fmt, args);
+    cpu_irq_restore(was_enabled);
 }
 
 void kprintf(const char *fmt, ...) {
@@ -154,4 +208,21 @@ void kprintf(const char *fmt, ...) {
     va_start(args, fmt);
     kvprintf(fmt, args);
     va_end(args);
+}
+
+int kvsnprintf(char *buf, size_t size, const char *fmt, va_list args) {
+    struct out o = { .putc = buffer_putc, .buf = buf, .size = size, .len = 0 };
+    format(&o, fmt, args);
+    if (size > 0) {
+        buf[o.len < size ? o.len : size - 1] = '\0';
+    }
+    return (int)o.len;
+}
+
+int ksnprintf(char *buf, size_t size, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int n = kvsnprintf(buf, size, fmt, args);
+    va_end(args);
+    return n;
 }

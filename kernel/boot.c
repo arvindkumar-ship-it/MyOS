@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include "lib/panic.h"
+#include "lib/kprintf.h"
 
 // ---------------------------------------------------------------------------
 // Limine requests
@@ -101,5 +102,28 @@ void boot_init(void) {
             m->virt_addr = f->address;
             m->size = f->size;
         }
+    }
+}
+
+static const char *memmap_type_name(uint64_t type) {
+    switch (type) {
+    case LIMINE_MEMMAP_USABLE:                 return "usable";
+    case LIMINE_MEMMAP_RESERVED:               return "reserved";
+    case LIMINE_MEMMAP_ACPI_RECLAIMABLE:       return "ACPI reclaimable";
+    case LIMINE_MEMMAP_ACPI_NVS:               return "ACPI NVS";
+    case LIMINE_MEMMAP_BAD_MEMORY:             return "bad memory";
+    case LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE: return "bootloader reclaimable";
+    case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES: return "kernel + modules";
+    case LIMINE_MEMMAP_FRAMEBUFFER:            return "framebuffer";
+    default:                                   return "other";
+    }
+}
+
+void boot_print_memmap(void) {
+    kprintf("physical memory map (%lu entries):\n", boot_info.memmap_count);
+    for (uint64_t i = 0; i < boot_info.memmap_count; i++) {
+        struct limine_memmap_entry *e = boot_info.memmap[i];
+        kprintf("  phys %016lx - %016lx  %8lu KiB  %s\n",
+                e->base, e->base + e->length, e->length / 1024, memmap_type_name(e->type));
     }
 }

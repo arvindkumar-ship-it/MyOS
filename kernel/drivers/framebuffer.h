@@ -33,3 +33,6 @@ void fb_clear(uint32_t color);
 
 // Move the whole picture up by "lines" pixel rows and fill the freed rows at the bottom.
 void fb_scroll_up(uint64_t lines, uint32_t fill_color);
+
+// Same, but only for pixel rows y_start .. height-1 (rows above stay as they are).
+void fb_scroll_region_up(uint64_t y_start, uint64_t lines, uint32_t fill_color);

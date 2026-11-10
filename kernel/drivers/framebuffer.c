@@ -51,15 +51,19 @@ void fb_clear(uint32_t color) {
     fb_fill_rect(0, 0, fb.width, fb.height, color);
 }
 
-void fb_scroll_up(uint64_t lines, uint32_t fill_color) {
-    if (lines >= fb.height) {
-        fb_clear(fill_color);
+void fb_scroll_region_up(uint64_t y_start, uint64_t lines, uint32_t fill_color) {
+    if (y_start >= fb.height) {
+        return;
+    }
+    uint64_t region_height = fb.height - y_start;
+    if (lines >= region_height) {
+        fb_fill_rect(0, y_start, fb.width, region_height, fill_color);
         return;
     }
     uint64_t pixels_per_row = fb.pitch / 4;
     // Copy each row from "lines" rows below. Top to bottom is safe because
     // we always read from below the row we write.
-    for (uint64_t y = 0; y < fb.height - lines; y++) {
+    for (uint64_t y = y_start; y < fb.height - lines; y++) {
         volatile uint32_t *dst = fb.virt_addr + y * pixels_per_row;
         volatile uint32_t *src = fb.virt_addr + (y + lines) * pixels_per_row;
         for (uint64_t x = 0; x < fb.width; x++) {
@@ -67,4 +71,8 @@ void fb_scroll_up(uint64_t lines, uint32_t fill_color) {
         }
     }
     fb_fill_rect(0, fb.height - lines, fb.width, lines, fill_color);
+}
+
+void fb_scroll_up(uint64_t lines, uint32_t fill_color) {
+    fb_scroll_region_up(0, lines, fill_color);
 }

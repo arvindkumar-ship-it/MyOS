@@ -41,3 +41,6 @@ extern struct boot_info boot_info;
 
 // Check Limine's answers and fill boot_info. Panics if something required is missing.
 void boot_init(void);
+
+// Print the physical memory map (one line per region).
+void boot_print_memmap(void);
