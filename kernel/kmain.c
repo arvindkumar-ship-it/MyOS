@@ -21,7 +21,6 @@
 #include "sched/task.h"
 #include "syscall/syscall.h"
 #include "proc/process.h"
-#include "proc/programs.h"
 #include "fs/vfs.h"
 #include "fs/tarfs.h"
 #include "fs/devfs.h"
@@ -29,33 +28,24 @@
 #include "drivers/ata.h"
 #include "tests/ktest.h"
 
-// ---------------------------------------------------------------------------
-// Stage 6 demo threads
-// ---------------------------------------------------------------------------
-
-// Done test of Stage 6: "A" and "B" print in turns, each sleeping in between.
-static void letter_thread(void *arg) {
-    const char *letter = arg;
-    for (int i = 1; i <= 5; i++) {
-        kprintf("%s%d ", letter, i);
-        task_sleep_ms(200);
-    }
-    kprintf("[%s done] ", letter);
-}
-
-// Echo typed characters. input_getc() blocks this task until a key arrives.
-static void echo_thread(void *arg) {
-    (void)arg;
-    for (;;) {
-        char c = input_getc();
-        kprintf("%c", c);
-    }
-}
-
 // Count tasks for the status bar.
 static void count_task(struct task *t, void *ctx) {
     (void)t;
     (*(int *)ctx)++;
+}
+
+// Keeps the status bar (row 0) up to date: tasks, context switches, uptime.
+static void status_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        int tasks = 0;
+        task_for_each(count_task, &tasks);
+        char status[80];
+        ksnprintf(status, sizeof(status), "MyOS | tasks: %d  switches: %lu  uptime: %lus ",
+                  tasks, sched_switch_count(), pit_uptime_ms() / 1000);
+        console_set_status(status);
+        task_sleep_ms(1000);
+    }
 }
 
 // Find the initrd module Limine loaded and mount it at "/".
@@ -141,27 +131,19 @@ void kmain(void) {
     // Automatic tests (only when booted with "test=...").
     ktest_run();
 
-    // Normal boot: the Stage 6 demo.
-    task_create("A", letter_thread, "A");
-    task_create("B", letter_thread, "B");
-    task_create("echo", echo_thread, NULL);
-
-    // Stage 7 demo: user programs in ring 3 (one of them crashes on purpose).
-    static const char *const demo_programs[] = { "hello", "crash_null", "fastcall" };
-    for (unsigned i = 0; i < sizeof(demo_programs) / sizeof(demo_programs[0]); i++) {
-        const struct builtin_program *p = program_find(demo_programs[i]);
-        process_spawn_flat(p->name, p->start, (size_t)(p->end - p->start));
-    }
-
-    // kmain itself keeps the status bar up to date. It runs on Limine's boot
-    // stack, so it must never exit.
+    // Normal boot (Stage 10): the shell is the first user process. kmain is
+    // its parent and starts a new one if it ever exits.
+    task_create("status", status_thread, NULL);
+    kprintf("\nStarting /bin/sh ...\n\n");
     for (;;) {
-        int tasks = 0;
-        task_for_each(count_task, &tasks);
-        char status[80];
-        ksnprintf(status, sizeof(status), "tasks: %d  switches: %lu  uptime: %lus ",
-                  tasks, sched_switch_count(), pit_uptime_ms() / 1000);
-        console_set_status(status);
-        task_sleep_ms(1000);
+        const char *argv[] = { "sh" };
+        const char *error;
+        struct task *sh = process_spawn_elf("/bin/sh", 1, argv, task_current(), &error);
+        if (sh == NULL) {
+            panic("cannot start /bin/sh: %s", error);
+        }
+        int code = 0;
+        task_wait(sh->id, &code);
+        kprintf("[shell exited with code %d, starting a new one]\n", code);
     }
 }

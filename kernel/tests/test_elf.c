@@ -102,3 +102,11 @@ void test_elf_leak(void) {
             codes_ok ? "ok" : "WRONG", page_leak, alloc_leak);
     ktest_finish(codes_ok && page_leak == 0 && alloc_leak == 0);
 }
+
+// Stage 10: the shell, driven by the test runner (it types the commands).
+void test_shell(void) {
+    const char *argv[] = { "sh" };
+    int code = run_elf("/bin/sh", 1, argv);
+    kprintf("kernel: shell exited with code %d\n", code);
+    ktest_finish(code == 7);
+}

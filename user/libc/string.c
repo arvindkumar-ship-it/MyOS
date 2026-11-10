@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdint.h>
+#include "syscall_nr.h"
 
 size_t strlen(const char *s) {
     size_t n = 0;
@@ -82,4 +83,24 @@ int memcmp(const void *a, const void *b, size_t n) {
         }
     }
     return 0;
+}
+
+const char *strerror(int err) {
+    switch (err) {
+    case ENOENT:  return "no such file or directory";
+    case E2BIG:   return "argument list too long";
+    case ENOEXEC: return "not an executable";
+    case EBADF:   return "bad file descriptor";
+    case ECHILD:  return "no such child";
+    case ENOMEM:  return "out of memory";
+    case EFAULT:  return "bad address";
+    case ENOTDIR: return "not a directory";
+    case EISDIR:  return "is a directory";
+    case EINVAL:  return "invalid argument";
+    case EMFILE:  return "too many open files";
+    case EROFS:   return "read-only file system";
+    case ENAMETOOLONG: return "name too long";
+    case ENOSYS:  return "not implemented";
+    default:      return "error";
+    }
 }

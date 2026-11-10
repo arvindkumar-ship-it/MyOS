@@ -13,6 +13,40 @@
 #define SYS_CLOSE   8   // close(fd) -> 0
 #define SYS_SPAWN   9   // spawn(path, argv) -> pid of a new process running that ELF file
 #define SYS_WAIT    10  // wait(pid, &exit_code) -> pid, after that child has exited
+#define SYS_READDIR 11  // readdir(path, index, &dirent) -> 1 (entry), 0 (no more)
+#define SYS_STAT    12  // stat(path, &stat) -> 0
+#define SYS_PS      13  // ps(procinfo array, max) -> number of processes
+
+// Shared structs for the calls above (same layout in kernel and user space).
+#include <stdint.h>
+
+#define MYOS_NAME_MAX 64
+
+#define MYOS_TYPE_FILE 1
+#define MYOS_TYPE_DIR  2
+#define MYOS_TYPE_DEV  3
+
+struct myos_dirent {
+    char name[MYOS_NAME_MAX];
+    uint32_t type;        // MYOS_TYPE_*
+    uint32_t reserved;
+    uint64_t size;
+};
+
+struct myos_stat {
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t size;
+};
+
+struct myos_procinfo {
+    uint64_t pid;
+    uint64_t ppid;        // 0 = no parent
+    uint64_t ticks;       // CPU time in timer ticks (10 ms)
+    uint32_t is_user;     // 1 = user process, 0 = kernel thread
+    char state[12];
+    char name[16];
+};
 
 // Error codes (returned as negative numbers).
 #define ENOENT  2    // no such file or directory

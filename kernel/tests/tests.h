@@ -62,6 +62,9 @@ void test_spawn(void);
 void test_elf_bad(void);
 void test_elf_leak(void);
 
+// Stage 10
+void test_shell(void);
+
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
@@ -106,4 +109,5 @@ void test_elf_leak(void);
     { "elf_hello", test_elf_hello }, \
     { "spawn",   test_spawn }, \
     { "elf_bad", test_elf_bad }, \
-    { "elf_leak", test_elf_leak },
+    { "elf_leak", test_elf_leak }, \
+    { "shell",   test_shell },

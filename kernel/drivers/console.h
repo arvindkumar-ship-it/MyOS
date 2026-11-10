@@ -8,6 +8,7 @@
 // Row 0 is a status bar (console_set_status); text scrolls in rows 1 and below.
 // Special characters: '\n' new line, '\r' start of line, '\b' erase one
 // character to the left, '\f' clear the text area.
+// ANSI escapes: "ESC[2J" clears, "ESC[H" moves home, others are ignored.
 
 // Check the font and reset the cursor. Returns false if the font is not valid PSF1.
 bool console_init(void);

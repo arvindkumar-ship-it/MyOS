@@ -145,12 +145,56 @@ static void putc_raw(char c) {
     }
 }
 
+// ANSI escape sequences ("ESC [ <numbers> <letter>") are what terminals
+// understand. Programs send them for the serial terminal; on the screen we
+// support "ESC[2J" (clear) and "ESC[H" (cursor home) and skip all others,
+// instead of drawing them as characters.
+static enum { ESC_NONE, ESC_START, ESC_CSI } esc_state;
+static int esc_param;
+
+// Returns true if c was part of an escape sequence (and is used up).
+static bool handle_escape(char c) {
+    switch (esc_state) {
+    case ESC_NONE:
+        if (c == 27) {
+            esc_state = ESC_START;
+            return true;
+        }
+        return false;
+    case ESC_START:
+        esc_state = c == '[' ? ESC_CSI : ESC_NONE;
+        esc_param = 0;
+        return true;
+    case ESC_CSI:
+        if (c >= '0' && c <= '9') {
+            esc_param = esc_param * 10 + (c - '0');
+            return true;
+        }
+        if (c == ';') {
+            esc_param = 0;
+            return true;
+        }
+        // Any letter ends the sequence.
+        esc_state = ESC_NONE;
+        if (c == 'J' && esc_param == 2) {
+            console_clear();
+        } else if (c == 'H') {
+            cursor_col = 0;
+            cursor_row = FIRST_TEXT_ROW;
+        }
+        return true;
+    }
+    return false;
+}
+
 void console_putc(char c) {
     if (!ready) {
         return;
     }
     draw_cursor(false);
-    putc_raw(c);
+    if (!handle_escape(c)) {
+        putc_raw(c);
+    }
     draw_cursor(true);
 }
 

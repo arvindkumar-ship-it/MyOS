@@ -11,6 +11,7 @@
 #include "proc/process.h"
 #include "proc/elf.h"
 #include "mm/heap.h"
+#include "lib/string.h"
 #include "mm/memory.h"
 #include "lib/kprintf.h"
 #include "arch/x86_64/cpu.h"
@@ -204,6 +205,102 @@ static int64_t sys_wait(uint64_t pid, uint64_t user_status) {
     return r;
 }
 
+static void fill_type_size(struct vfs_node *n, uint32_t *type, uint64_t *size) {
+    *type = n->type == VFS_DIR ? MYOS_TYPE_DIR : n->type == VFS_DEV ? MYOS_TYPE_DEV : MYOS_TYPE_FILE;
+    *size = n->size;
+}
+
+static int64_t sys_readdir(uint64_t user_path, uint64_t index, uint64_t user_out) {
+    char path[256];
+    int64_t len = copy_user_string(user_path, path, sizeof(path));
+    if (len < 0) {
+        return len;
+    }
+    if (!user_ok(user_out, sizeof(struct myos_dirent), true)) {
+        return -EFAULT;
+    }
+    struct vfs_node *dir = vfs_lookup(path);
+    if (dir == NULL) {
+        return -ENOENT;
+    }
+    if (dir->type != VFS_DIR) {
+        return -ENOTDIR;
+    }
+    struct vfs_node *n = vfs_readdir(dir, index);
+    if (n == NULL) {
+        return 0;
+    }
+    struct myos_dirent *out = (struct myos_dirent *)user_out;
+    memset(out, 0, sizeof(*out));
+    memcpy(out->name, n->name, VFS_NAME_MAX < MYOS_NAME_MAX ? VFS_NAME_MAX : MYOS_NAME_MAX);
+    out->name[MYOS_NAME_MAX - 1] = '\0';
+    fill_type_size(n, &out->type, &out->size);
+    return 1;
+}
+
+static int64_t sys_stat(uint64_t user_path, uint64_t user_out) {
+    char path[256];
+    int64_t len = copy_user_string(user_path, path, sizeof(path));
+    if (len < 0) {
+        return len;
+    }
+    if (!user_ok(user_out, sizeof(struct myos_stat), true)) {
+        return -EFAULT;
+    }
+    struct vfs_node *n = vfs_lookup(path);
+    if (n == NULL) {
+        return -ENOENT;
+    }
+    struct myos_stat *out = (struct myos_stat *)user_out;
+    memset(out, 0, sizeof(*out));
+    fill_type_size(n, &out->type, &out->size);
+    return 0;
+}
+
+// ps: copy a snapshot of the task list. Interrupts are off while
+// task_for_each runs, so we fill a kernel buffer first and copy it out after.
+struct ps_ctx {
+    struct myos_procinfo *buf;
+    uint64_t max;
+    uint64_t count;
+};
+
+static void ps_collect(struct task *t, void *arg) {
+    struct ps_ctx *ctx = arg;
+    if (ctx->count == ctx->max) {
+        return;
+    }
+    struct myos_procinfo *p = &ctx->buf[ctx->count++];
+    memset(p, 0, sizeof(*p));
+    p->pid = t->id;
+    p->ppid = t->parent != NULL ? t->parent->id : 0;
+    p->ticks = t->ticks_used;
+    p->is_user = t->is_user;
+    const char *state = task_state_name(t->state);
+    for (int i = 0; i < 11 && state[i]; i++) {
+        p->state[i] = state[i];
+    }
+    memcpy(p->name, t->name, TASK_NAME_LEN < 16 ? TASK_NAME_LEN : 16);
+    p->name[15] = '\0';
+}
+
+static int64_t sys_ps(uint64_t user_buf, uint64_t max) {
+    if (max > 64) {
+        max = 64;
+    }
+    if (!user_ok(user_buf, max * sizeof(struct myos_procinfo), true)) {
+        return -EFAULT;
+    }
+    struct ps_ctx ctx = { .buf = kmalloc(max * sizeof(struct myos_procinfo) + 1), .max = max };
+    if (ctx.buf == NULL) {
+        return -ENOMEM;
+    }
+    task_for_each(ps_collect, &ctx);
+    memcpy((void *)user_buf, ctx.buf, ctx.count * sizeof(struct myos_procinfo));
+    kfree(ctx.buf);
+    return (int64_t)ctx.count;
+}
+
 static int64_t sys_exit(uint64_t code) {
     struct task *t = task_current();
     // Processes started by the kernel are announced; a shell's children are quiet.
@@ -228,6 +325,9 @@ int64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
     case SYS_CLOSE:  return sys_close(a1);
     case SYS_SPAWN:  return sys_spawn(a1, a2);
     case SYS_WAIT:   return sys_wait(a1, a2);
+    case SYS_READDIR: return sys_readdir(a1, a2, a3);
+    case SYS_STAT:   return sys_stat(a1, a2);
+    case SYS_PS:     return sys_ps(a1, a2);
     default:         return -ENOSYS;
     }
 }

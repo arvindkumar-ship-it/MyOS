@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "syscall_nr.h"
 
 // System call wrappers. Return values < 0 are -errno (see syscall_nr.h).
 
@@ -16,6 +17,12 @@ uint64_t uptime_ms(void);
 int spawn(const char *path, const char *const *argv);
 // Wait for child "pid" to end; *status = its exit code. Returns pid or -ECHILD.
 int wait(int pid, int *status);
+
+// Directory entry number "index" of "path": 1 = *entry filled, 0 = no more.
+int readdir(const char *path, int index, struct myos_dirent *entry);
+int stat(const char *path, struct myos_stat *st);
+// Fill up to max entries with the process list; returns how many.
+int ps(struct myos_procinfo *list, int max);
 
 #define O_RDONLY 0
 #define O_WRONLY 1

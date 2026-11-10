@@ -38,6 +38,18 @@ int wait(int pid, int *status) {
     return (int)syscall2(SYS_WAIT, (uint64_t)pid, (uint64_t)status);
 }
 
+int readdir(const char *path, int index, struct myos_dirent *entry) {
+    return (int)syscall3(SYS_READDIR, (uint64_t)path, (uint64_t)index, (uint64_t)entry);
+}
+
+int stat(const char *path, struct myos_stat *st) {
+    return (int)syscall2(SYS_STAT, (uint64_t)path, (uint64_t)st);
+}
+
+int ps(struct myos_procinfo *list, int max) {
+    return (int)syscall2(SYS_PS, (uint64_t)list, (uint64_t)max);
+}
+
 void exit(int code) {
     syscall1(SYS_EXIT, (uint64_t)code);
     for (;;) {
