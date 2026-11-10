@@ -15,6 +15,7 @@
 #include "drivers/pit.h"
 #include "drivers/keyboard.h"
 #include "drivers/input.h"
+#include "mm/pmm.h"
 #include "tests/ktest.h"
 
 // Stage 4 demo: echo typed characters (keyboard or serial) and show the
@@ -83,6 +84,9 @@ void kmain(void) {
     serial_enable_rx_irq();
     cpu_sti();   // from here on, IRQs arrive
     kprintf("PIC remapped, PIT at %d Hz, keyboard + serial input on, interrupts enabled\n", PIT_HZ);
+
+    // Stage 5: memory management.
+    pmm_init();
 
     // Automatic tests (only when booted with "test=...").
     ktest_run();

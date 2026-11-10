@@ -21,6 +21,10 @@ void test_ud(void);
 void test_timer(void);
 void test_readline(void);
 
+// Stage 5
+void test_pmm(void);
+void test_pmm_double_free(void);
+
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
@@ -34,4 +38,6 @@ void test_readline(void);
     { "ud",      test_ud }, \
     { "timer",   test_timer }, \
     { "keyboard", test_readline }, \
-    { "serialin", test_readline },
+    { "serialin", test_readline }, \
+    { "pmm",     test_pmm }, \
+    { "pmm_double_free", test_pmm_double_free },

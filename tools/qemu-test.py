@@ -130,6 +130,19 @@ TESTS = [
         ("expect", "got line: 'echo from serial'"),
         ("expect", "TEST PASS: serialin"),
     ], forbid=[PANIC_RE], exit=3),
+
+    # Stage 5 Done test (PMM): 1000 pages allocated and freed without a leak.
+    dict(name="pmm", steps=[
+        ("expect_re", r"pmm: \d+ MiB RAM tracked"),
+        ("expect", "allocated 1000 pages"),
+        ("expect", "(diff 1000)"),
+        ("expect", "leak = 0 pages"),
+        ("expect", "TEST PASS: pmm"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="pmm_double_free", steps=[
+        ("expect_re", r"pmm_free: double free of phys 0x[0-9a-f]{16}"),
+    ], forbid=[r"TEST PASS"], exit=5),
 ]
 
 # ---------------------------------------------------------------------------
