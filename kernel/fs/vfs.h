@@ -46,6 +46,7 @@ struct vfs_node {
     // their children in this list.
     struct vfs_node *first_child;
     struct vfs_node *next_sibling;
+    bool children_loaded;          // disk filesystems: directory already read into the list
 };
 
 // An open file: a node plus the current position. Shared by fds that point to it.

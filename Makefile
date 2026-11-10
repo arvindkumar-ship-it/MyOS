@@ -93,30 +93,45 @@ INITRD       := $(BUILD_DIR)/initrd.tar
 INITRD_ROOT  := $(BUILD_DIR)/initrd-root
 INITRD_FILES := $(shell find initrd -type f)
 
+# Disks (Stage 8, second part):
+#   disk.img     64 MiB FAT32 volume with the files from disk/ (+ numbers.txt)
+#   scratch.img  1 MiB of zeros, for raw sector write tests
+DISK       := $(BUILD_DIR)/disk.img
+SCRATCH    := $(BUILD_DIR)/scratch.img
+DISK_FILES := $(shell find disk -type f)
+
 # ---------------------------------------------------------------------------
 # QEMU (commands from docs/os-kernel-guide.md)
 # ---------------------------------------------------------------------------
 QEMU      := qemu-system-x86_64
-QEMUFLAGS := -cdrom $(ISO) -m 512M -serial stdio -no-reboot -no-shutdown \
-    -device isa-debug-exit,iobase=0xf4,iosize=0x04
+QEMUFLAGS := -cdrom $(ISO) -boot d -m 512M -serial stdio -no-reboot -no-shutdown \
+    -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+    -drive file=$(DISK),format=raw,if=ide,index=0,media=disk,snapshot=on \
+    -drive file=$(SCRATCH),format=raw,if=ide,index=1,media=disk,snapshot=on
 # isa-debug-exit: lets the kernel quit QEMU (used by tests, see kernel/drivers/qemu.c).
+# Disks: primary master = FAT32 disk, primary slave = scratch disk (the CD-ROM
+# is on the secondary bus). snapshot=on: writes go to a temporary copy, the
+# image files never change. -boot d: boot from the CD-ROM (with a hard disk
+# attached, the BIOS would try that first; it has no boot loader).
 
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all run debug test clean distclean
+.PHONY: all images run debug test clean distclean
 
-all: $(ISO)
+all: $(ISO) $(DISK) $(SCRATCH)
 
-run: $(ISO)
+images: all
+
+run: $(ISO) $(DISK) $(SCRATCH)
 	$(QEMU) $(QEMUFLAGS)
 
-debug: $(ISO)
+debug: $(ISO) $(DISK) $(SCRATCH)
 	$(QEMU) $(QEMUFLAGS) -s -S -d int,cpu_reset -D qemu.log
 
 # Headless tests. The script rebuilds the ISO with "test=<name>" for each test.
 T ?=
-test: $(KERNEL) $(LIMINE_TOOL)
+test: $(KERNEL) $(LIMINE_TOOL) $(DISK) $(SCRATCH)
 	python3 -I tools/qemu-test.py $(T)
 
 # Compile one C file. Objects depend on limine.h being downloaded first.
@@ -168,6 +183,21 @@ $(INITRD): $(INITRD_FILES)
 	mkdir -p $(INITRD_ROOT)
 	cp -r initrd/. $(INITRD_ROOT)/
 	tar --format=ustar --owner=0 --group=0 --sort=name -cf $@ -C $(INITRD_ROOT) .
+
+# FAT32 disk image: mformat -F makes a FAT32 volume over the whole image (no
+# partition table), mcopy -s copies folders recursively.
+$(DISK): $(DISK_FILES)
+	@mkdir -p $(dir $@)
+	rm -f $@
+	dd if=/dev/zero of=$@ bs=1M count=64 status=none
+	mformat -i $@ -F -T 131072 -h 64 -s 32 -v MYOSDISK ::
+	mcopy -i $@ -s disk/* ::/
+	seq 1 2000 > $(BUILD_DIR)/numbers.txt
+	mcopy -i $@ $(BUILD_DIR)/numbers.txt ::/numbers.txt
+
+$(SCRATCH):
+	@mkdir -p $(dir $@)
+	dd if=/dev/zero of=$@ bs=1M count=1 status=none
 
 $(ISO): $(KERNEL) $(INITRD) $(BUILD_DIR)/limine.conf $(LIMINE_TOOL)
 	rm -rf iso_root

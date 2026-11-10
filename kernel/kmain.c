@@ -25,6 +25,8 @@
 #include "fs/vfs.h"
 #include "fs/tarfs.h"
 #include "fs/devfs.h"
+#include "fs/fat32.h"
+#include "drivers/ata.h"
 #include "tests/ktest.h"
 
 // ---------------------------------------------------------------------------
@@ -131,6 +133,10 @@ void kmain(void) {
     vfs_init();
     mount_initrd();
     devfs_init();
+    ata_init();
+    if (!fat32_mount(0, "/disk")) {
+        kprintf("no FAT32 disk on ATA drive 0, /disk not mounted\n");
+    }
 
     // Automatic tests (only when booted with "test=...").
     ktest_run();

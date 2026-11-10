@@ -303,6 +303,26 @@ TESTS = [
         ("expect", "TEST PASS: user_cat"),
     ], forbid=[PANIC_RE, "FAILED"], exit=3),
 
+    # Stage 8 (later part): ATA PIO driver + FAT32 on a disk.
+    dict(name="disk", steps=[
+        ("expect", "ata: drive 0: 'QEMU HARDDISK', 131072 sectors (64 MiB)"),
+        ("expect", "fat32: 'MYOSDISK' mounted at /disk"),
+        ("expect", "  docs/\r\n    nested-file.txt (45 bytes)\r\n  readme.txt (70 bytes)\r\n"
+                   "  welcome-to-the-disk.txt (87 bytes)\r\n  numbers.txt (8893 bytes)"),
+        ("expect", "/disk/readme.txt: This file lives on a FAT32 disk."),
+        ("expect", "/disk/welcome-to-the-disk.txt: Welcome to the disk!"),
+        ("expect", "/disk/docs/nested-file.txt: A file inside a directory"),
+        ("expect", "numbers.txt: 8893 bytes, lines 1..2000 in order: ok"),
+        ("expect", "read across a cluster boundary: ok"),
+        ("expect", "TEST PASS: disk"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="ata", steps=[
+        ("expect", "ata: wrote 4 sectors at LBA 10: ok, read back: ok, data identical"),
+        ("expect", "read past the end of the disk refused: yes"),
+        ("expect", "TEST PASS: ata"),
+    ], forbid=[PANIC_RE], exit=3),
+
     dict(name="user_leak", steps=[
         ("expect", "20 processes: page leak 0, heap leak 0, page-table leak 0"),
         ("expect", "TEST PASS: user_leak"),
@@ -348,9 +368,13 @@ class Qemu:
             if os.path.exists(p):
                 os.remove(p)
         cmd = [
-            "qemu-system-x86_64", "-cdrom", os.path.join(ROOT, "myos.iso"), "-m", "512M",
+            "qemu-system-x86_64", "-cdrom", os.path.join(ROOT, "myos.iso"), "-boot", "d", "-m", "512M",
             "-serial", "stdio", "-display", "none", "-no-reboot",
             "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
+            "-drive", "file=%s,format=raw,if=ide,index=0,media=disk,snapshot=on"
+                      % os.path.join(ROOT, "build", "disk.img"),
+            "-drive", "file=%s,format=raw,if=ide,index=1,media=disk,snapshot=on"
+                      % os.path.join(ROOT, "build", "scratch.img"),
             "-monitor", "unix:%s,server,nowait" % self.sock_path,
             "-d", "cpu_reset,guest_errors", "-D", self.qemu_log,
         ]

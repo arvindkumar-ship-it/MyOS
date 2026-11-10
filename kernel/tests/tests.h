@@ -53,6 +53,8 @@ void test_user_syscall(void);
 // Stage 8
 void test_vfs(void);
 void test_user_cat(void);
+void test_disk(void);
+void test_ata(void);
 
 #define KTEST_LIST \
     { "boot",    test_boot }, \
@@ -92,4 +94,6 @@ void test_user_cat(void);
     { "user_leak", test_user_leak }, \
     { "user_syscall", test_user_syscall }, \
     { "vfs",     test_vfs }, \
-    { "user_cat", test_user_cat },
+    { "user_cat", test_user_cat }, \
+    { "disk",    test_disk }, \
+    { "ata",     test_ata },

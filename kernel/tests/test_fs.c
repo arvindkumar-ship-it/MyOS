@@ -75,3 +75,89 @@ void test_vfs(void) {
 
     ktest_finish(ok);
 }
+
+// ---------------------------------------------------------------------------
+// Disk: ATA PIO + FAT32
+// ---------------------------------------------------------------------------
+
+#include "drivers/ata.h"
+
+// Read and check /disk/numbers.txt = "1\n2\n...2000\n" (spans many clusters).
+static bool check_numbers(void) {
+    uint64_t size;
+    char *text = vfs_read_all("/disk/numbers.txt", &size);
+    if (text == NULL) {
+        return false;
+    }
+    uint64_t expected = 1, value = 0;
+    bool ok = true;
+    for (uint64_t i = 0; i < size; i++) {
+        if (text[i] == '\n') {
+            if (value != expected) {
+                kprintf("numbers.txt: line %lu is %lu\n", expected, value);
+                ok = false;
+                break;
+            }
+            expected++;
+            value = 0;
+        } else {
+            value = value * 10 + (uint64_t)(text[i] - '0');
+        }
+    }
+    kprintf("numbers.txt: %lu bytes, lines 1..%lu in order: %s\n",
+            size, expected - 1, ok && expected == 2001 ? "ok" : "WRONG");
+    kfree(text);
+    return ok && expected == 2001;
+}
+
+void test_disk(void) {
+    bool ok = true;
+    kprintf("tree of /disk:\n");
+    print_tree(vfs_lookup("/disk"), 1);
+
+    const char *files[] = { "/disk/readme.txt", "/disk/welcome-to-the-disk.txt",
+                            "/disk/docs/nested-file.txt" };
+    for (int i = 0; i < 3; i++) {
+        uint64_t size;
+        char *text = vfs_read_all(files[i], &size);
+        kprintf("%s: %s", files[i], text ? text : "MISSING\n");
+        ok = ok && text != NULL;
+        kfree(text);
+    }
+
+    ok = check_numbers() && ok;
+
+    // Reads that start in the middle of a cluster and cross into the next one.
+    int64_t err;
+    struct file *f = vfs_open("/disk/numbers.txt", O_RDONLY, &err);
+    char a[100], b[100];
+    f->offset = 1000;                     // cluster 1 (512-byte clusters), offset 488
+    int64_t n = vfs_read(f, a, sizeof(a));
+    uint64_t size;
+    char *all = vfs_read_all("/disk/numbers.txt", &size);
+    memcpy(b, all + 1000, sizeof(b));
+    bool cross = n == (int64_t)sizeof(a) && memcmp(a, b, sizeof(a)) == 0;
+    kprintf("read across a cluster boundary: %s\n", cross ? "ok" : "WRONG");
+    ok = ok && cross;
+    kfree(all);
+    vfs_close(f);
+
+    ktest_finish(ok);
+}
+
+// Raw sectors on the scratch disk (ATA drive 1): write, read back, compare.
+void test_ata(void) {
+    static uint8_t out[4 * ATA_SECTOR_SIZE], in[4 * ATA_SECTOR_SIZE];
+    for (unsigned i = 0; i < sizeof(out); i++) {
+        out[i] = (uint8_t)(i * 7 + 3);
+    }
+    bool wrote = ata_write(1, 10, 4, out);
+    memset(in, 0, sizeof(in));
+    bool read = ata_read(1, 10, 4, in);
+    bool same = memcmp(in, out, sizeof(out)) == 0;
+    kprintf("ata: wrote 4 sectors at LBA 10: %s, read back: %s, data %s\n",
+            wrote ? "ok" : "FAILED", read ? "ok" : "FAILED", same ? "identical" : "DIFFERENT");
+    bool range = !ata_read(1, 2047, 2, in);   // last sector + 1: past the end
+    kprintf("ata: read past the end of the disk refused: %s\n", range ? "yes" : "NO");
+    ktest_finish(wrote && read && same && range);
+}
