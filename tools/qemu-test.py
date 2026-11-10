@@ -272,6 +272,16 @@ TESTS = [
         ("expect", "TEST PASS: user_read"),
     ], forbid=[PANIC_RE], exit=3),
 
+    # Stage 7: the syscall/sysret path.
+    dict(name="user_syscall", steps=[
+        ("expect", "fastcall: hello via the syscall instruction"),
+        ("expect", "fastcall: getpid via syscall == getpid via int 0x80"),
+        ("expect_re", r"fastcall: 200000 x getpid: int 0x80 \d+ ms, syscall \d+ ms"),
+        ("expect_re", r"\[process 'fastcall' \(pid \d+\) exited with code 0\]"),
+        ("expect", "Hello from user mode!"),
+        ("expect", "TEST PASS: user_syscall"),
+    ], forbid=[PANIC_RE], exit=3, timeout=60),
+
     dict(name="user_leak", steps=[
         ("expect", "20 processes: page leak 0, heap leak 0, page-table leak 0"),
         ("expect", "TEST PASS: user_leak"),

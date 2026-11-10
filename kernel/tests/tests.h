@@ -48,6 +48,7 @@ void test_user_crash(void);
 void test_user_badptr(void);
 void test_user_read(void);
 void test_user_leak(void);
+void test_user_syscall(void);
 
 #define KTEST_LIST \
     { "boot",    test_boot }, \
@@ -84,4 +85,5 @@ void test_user_leak(void);
     { "user_crash", test_user_crash }, \
     { "user_badptr", test_user_badptr }, \
     { "user_read", test_user_read }, \
-    { "user_leak", test_user_leak },
+    { "user_leak", test_user_leak }, \
+    { "user_syscall", test_user_syscall },

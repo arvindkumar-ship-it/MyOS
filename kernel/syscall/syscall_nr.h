@@ -8,6 +8,7 @@
 #define SYS_GETPID  3   // getpid() -> pid
 #define SYS_SLEEP   4   // sleep(ms) -> 0
 #define SYS_READ    5   // read(fd, buf, len) -> bytes read (waits for at least 1)
+#define SYS_UPTIME  6   // uptime() -> milliseconds since boot
 
 // Error codes (returned as negative numbers).
 #define EBADF   9    // bad file descriptor

@@ -70,3 +70,7 @@ void test_user_leak(void) {
             page_leak, alloc_leak, table_leak);
     ktest_finish(page_leak == 0 && alloc_leak == 0 && table_leak == 0);
 }
+
+void test_user_syscall(void) {
+    ktest_finish(run_program("fastcall") && run_program("hello"));
+}

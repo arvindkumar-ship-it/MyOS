@@ -117,6 +117,13 @@ void kmain(void) {
     task_create("B", letter_thread, "B");
     task_create("echo", echo_thread, NULL);
 
+    // Stage 7 demo: user programs in ring 3 (one of them crashes on purpose).
+    static const char *const demo_programs[] = { "hello", "crash_null", "fastcall" };
+    for (unsigned i = 0; i < sizeof(demo_programs) / sizeof(demo_programs[0]); i++) {
+        const struct builtin_program *p = program_find(demo_programs[i]);
+        process_spawn_flat(p->name, p->start, (size_t)(p->end - p->start));
+    }
+
     // kmain itself keeps the status bar up to date. It runs on Limine's boot
     // stack, so it must never exit.
     for (;;) {

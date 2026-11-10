@@ -124,7 +124,7 @@ $(BUILD_DIR)/%.asm.o: %.asm
 	$(AS) $(ASFLAGS) -MD $(@:.o=.d) $< -o $@
 
 # Assemble a user program as a flat binary (-f bin: raw bytes, no ELF).
-$(BUILD_DIR)/user/%.bin: user/asm/%.asm user/include/syscall.inc
+$(BUILD_DIR)/user/%.bin: user/asm/%.asm user/include/syscall.inc user/include/lib.inc
 	@mkdir -p $(dir $@)
 	$(AS) -f bin -I user/include/ $< -o $@
 

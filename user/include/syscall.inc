@@ -6,6 +6,7 @@
 %define SYS_GETPID  3
 %define SYS_SLEEP   4
 %define SYS_READ    5
+%define SYS_UPTIME  6
 
 %define EFAULT      14
 

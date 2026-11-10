@@ -23,6 +23,7 @@ PROGRAM crash_priv
 PROGRAM crash_kernel
 PROGRAM badptr
 PROGRAM reader
+PROGRAM fastcall
 
 section .rodata
 align 8
@@ -37,6 +38,7 @@ builtin_programs:
     ENTRY crash_kernel
     ENTRY badptr
     ENTRY reader
+    ENTRY fastcall
     dq 0, 0, 0              ; end of table
 
 section .note.GNU-stack noalloc noexec nowrite progbits
