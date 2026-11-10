@@ -244,8 +244,9 @@ void test_heap(void) {
 
     struct heap_stats end = heap_get_stats();
     bool check = heap_check();
-    kprintf("heap: all freed: %lu allocations, %lu bytes used, %lu free block(s), heap_check %s\n",
-            end.allocations, end.used_bytes, end.free_blocks, check ? "ok" : "FAILED");
+    kprintf("heap: all freed: leaked %ld allocations / %ld bytes, %lu free block(s), heap_check %s\n",
+            (long)(end.allocations - start.allocations), (long)(end.used_bytes - start.used_bytes),
+            end.free_blocks, check ? "ok" : "FAILED");
 
     // Everything merged back into one block: a request for all of it must
     // succeed without growing the heap.

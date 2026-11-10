@@ -33,6 +33,15 @@ void test_heap(void);
 void test_heap_double_free(void);
 void test_heap_overflow(void);
 
+// Stage 6
+void test_threads(void);
+void test_preempt(void);
+void test_sleep(void);
+void test_race(void);
+void test_deadlock(void);
+void test_stack_overflow(void);
+void test_task_leak(void);
+
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
@@ -56,4 +65,11 @@ void test_heap_overflow(void);
     { "null",    test_null }, \
     { "heap",    test_heap }, \
     { "heap_double_free", test_heap_double_free }, \
-    { "heap_overflow", test_heap_overflow },
+    { "heap_overflow", test_heap_overflow }, \
+    { "threads", test_threads }, \
+    { "preempt", test_preempt }, \
+    { "sleep",   test_sleep }, \
+    { "race",    test_race }, \
+    { "deadlock", test_deadlock }, \
+    { "stack_overflow", test_stack_overflow }, \
+    { "task_leak", test_task_leak },

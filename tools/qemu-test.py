@@ -178,17 +178,57 @@ TESTS = [
     dict(name="heap", steps=[
         ("expect", "heap: free-list allocator"),
         ("expect", "heap: after 5000 random ops"),
-        ("expect", "heap: all freed: 0 allocations, 0 bytes used, 1 free block(s), heap_check ok"),
+        ("expect", "heap: all freed: leaked 0 allocations / 0 bytes, 1 free block(s), heap_check ok"),
         ("expect", "ok, no growth"),
         ("expect", "3 MiB kmalloc grew the heap"),
         ("expect", "TEST PASS: heap"),
     ], forbid=[PANIC_RE], exit=3),
 
-    dict(name="heap_double_free", steps=[("expect", "kfree: double free of 0xffffc000000000")],
+    dict(name="heap_double_free", steps=[("expect_re", r"kfree: double free of 0xffffc0000000[0-9a-f]{4}")],
          forbid=[r"TEST PASS"], exit=5),
 
     dict(name="heap_overflow", steps=[("expect", "has a bad header (magic 58585858)")],
          forbid=[r"TEST PASS"], exit=5),
+
+    # Stage 6 Done test: A and B print in turns (yield and sleep versions).
+    dict(name="threads", steps=[
+        ("expect", "scheduler running"),
+        ("expect", "yield: A1 B1 A2 B2 A3 B3 A4 B4 A5 B5"),
+        ("expect", "sleep: A1 B1 A2 B2 A3 B3 A4 B4 A5 B5"),
+        ("expect", "TEST PASS: threads"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="preempt", steps=[("expect_re", r"preempt: spin0 \d+ loops, spin1 \d+ loops"),
+                                ("expect", "TEST PASS: preempt")], forbid=[PANIC_RE], exit=3),
+
+    # Stage 6 Done test: sleep(ms) works (order + real time).
+    dict(name="sleep", steps=[
+        ("expect", "slept 100 ms (asked 100)"),
+        ("expect", "slept 200 ms (asked 200)"),
+        ("expect", "slept 300 ms (asked 300)"),
+        ("expect", "wake order: 100 200 300"),
+        ("mark", None),
+        ("expect", "main slept 1000 ms: 100 ticks"), ("elapsed", (0.8, 1.5)),
+        ("expect", "TEST PASS: sleep"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="race", steps=[
+        ("expect", "race without lock:"),
+        ("expect_re", r"race with spinlock: counter (\d+), increments \1, lost 0 updates"),
+        ("expect", "TEST PASS: race"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="deadlock", steps=[("expect", "deadlock: spinlock 'test_lock' is already held")],
+         forbid=[r"TEST PASS"], exit=5),
+
+    dict(name="stack_overflow", steps=[
+        ("expect", "Double fault"),
+        ("expect", "handler running on IST1 stack: yes"),
+        ("expect", "kernel stack overflow: guard page hit"),
+    ], forbid=[r"TEST PASS"], exit=5),
+
+    dict(name="task_leak", steps=[("expect", "100 tasks done: page leak 0, heap allocation leak 0"),
+                                  ("expect", "TEST PASS: task_leak")], forbid=[PANIC_RE], exit=3),
 ]
 
 # ---------------------------------------------------------------------------
