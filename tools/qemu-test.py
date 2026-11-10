@@ -143,6 +143,36 @@ TESTS = [
     dict(name="pmm_double_free", steps=[
         ("expect_re", r"pmm_free: double free of phys 0x[0-9a-f]{16}"),
     ], forbid=[r"TEST PASS"], exit=5),
+
+    # VMM: own page tables, map/unmap 1000 pages, no leak.
+    dict(name="vmm", steps=[
+        ("expect", "vmm: own page tables active"),
+        # text: present only (read+execute); rodata: present+NX; data: present+write+NX
+        ("expect_re", r"flags: text [0-9a-f]*1, rodata 8000000000000[0-9a-f]*1, "
+                      r"data 8000000000000[0-9a-f]*3"),
+        ("expect", "vmm: 1000 pages mapped at 0xffffe00000000000"),
+        ("expect", "unmapped=yes, leak = 0 pages"),
+        ("expect", "TEST PASS: vmm"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    # Stage 5 Done test (page fault): the handler prints the bad address.
+    dict(name="vmm_unmapped", steps=[
+        ("expect", "unmapping it and writing again..."),
+        ("expect", "not-present page on write, kernel mode, address CR2=0xffffe00000005000"),
+    ], forbid=[r"not reached"], exit=5),
+
+    dict(name="nx", steps=[
+        ("expect", "protection violation on instruction fetch, kernel mode, "
+                   "address CR2=0xffffe00000009000"),
+    ], forbid=[r"not reached"], exit=5),
+
+    dict(name="wp", steps=[
+        ("expect_re", r"protection violation on write, kernel mode, address CR2=0xffffffff8000"),
+    ], forbid=[r"not reached"], exit=5),
+
+    dict(name="null", steps=[
+        ("expect", "not-present page on read, kernel mode, address CR2=0x0000000000000000"),
+    ], forbid=[r"not reached"], exit=5),
 ]
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,11 @@ void test_readline(void);
 // Stage 5
 void test_pmm(void);
 void test_pmm_double_free(void);
+void test_vmm(void);
+void test_vmm_unmapped(void);
+void test_nx(void);
+void test_wp(void);
+void test_null(void);
 
 #define KTEST_LIST \
     { "boot",    test_boot }, \
@@ -40,4 +45,9 @@ void test_pmm_double_free(void);
     { "keyboard", test_readline }, \
     { "serialin", test_readline }, \
     { "pmm",     test_pmm }, \
-    { "pmm_double_free", test_pmm_double_free },
+    { "pmm_double_free", test_pmm_double_free }, \
+    { "vmm",     test_vmm }, \
+    { "vmm_unmapped", test_vmm_unmapped }, \
+    { "nx",      test_nx }, \
+    { "wp",      test_wp }, \
+    { "null",    test_null },

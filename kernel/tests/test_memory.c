@@ -68,3 +68,102 @@ void test_pmm_double_free(void) {
     pmm_free_page(phys);
     ktest_finish(false);
 }
+
+// ---------------------------------------------------------------------------
+// VMM
+// ---------------------------------------------------------------------------
+
+#include "mm/vmm.h"
+
+#define VMM_TEST_PAGES 1000
+
+// Map 1000 fresh pages at a test address, use them through the NEW virtual
+// address, check the translation, unmap, and check nothing leaked.
+void test_vmm(void) {
+    struct address_space *as = vmm_kernel_space();
+    uint64_t virt = VIRT_TEST_START;
+
+    // Print the permissions our page tables gave the kernel image.
+    extern char __kernel_text_start[], __kernel_rodata_start[], __kernel_data_start[];
+    kprintf("flags: text %lx, rodata %lx, data %lx\n",
+            vmm_get_flags(as, (uint64_t)__kernel_text_start),
+            vmm_get_flags(as, (uint64_t)__kernel_rodata_start),
+            vmm_get_flags(as, (uint64_t)__kernel_data_start));
+
+    // Warm-up round: the first mapping in a new area allocates page tables,
+    // which stay (we do not free empty tables). Measure leaks after it.
+    vmm_alloc_pages(as, virt, VMM_TEST_PAGES, PTE_WRITE | PTE_NX);
+    vmm_free_pages(as, virt, VMM_TEST_PAGES);
+
+    uint64_t free_before = pmm_get_stats().free_pages;
+    uint64_t tables_before = vmm_table_pages();
+
+    if (!vmm_alloc_pages(as, virt, VMM_TEST_PAGES, PTE_WRITE | PTE_NX)) {
+        kprintf("vmm_alloc_pages failed\n");
+        ktest_finish(false);
+    }
+    for (uint64_t i = 0; i < VMM_TEST_PAGES; i++) {
+        uint64_t *virt_page = (uint64_t *)(virt + i * PAGE_SIZE);
+        virt_page[0] = 0xC0FFEE00 + i;               // write through the new mapping
+        uint64_t phys = vmm_translate(as, (uint64_t)virt_page);
+        uint64_t *alias = phys_to_virt(phys);         // same RAM, seen through the HHDM
+        if (phys == (uint64_t)-1 || alias[0] != 0xC0FFEE00 + i) {
+            kprintf("page %lu: translation wrong (phys %p)\n", i, (void *)phys);
+            ktest_finish(false);
+        }
+    }
+    kprintf("vmm: 1000 pages mapped at %p, written and checked via HHDM\n", (void *)virt);
+
+    vmm_free_pages(as, virt, VMM_TEST_PAGES);
+    bool unmapped = vmm_translate(as, virt) == (uint64_t)-1;
+
+    uint64_t free_after = pmm_get_stats().free_pages;
+    kprintf("vmm: unmapped=%s, leak = %ld pages, table pages %lu -> %lu\n",
+            unmapped ? "yes" : "no", (long)(free_before - free_after),
+            tables_before, vmm_table_pages());
+    ktest_finish(unmapped && free_before == free_after && tables_before == vmm_table_pages());
+}
+
+// Done test of Stage 5 (page fault part): touch a page after unmapping it.
+// The page fault handler must print exactly that address.
+void test_vmm_unmapped(void) {
+    struct address_space *as = vmm_kernel_space();
+    uint64_t virt = VIRT_TEST_START + 0x5000;
+    vmm_alloc_pages(as, virt, 1, PTE_WRITE | PTE_NX);
+    *(volatile uint64_t *)virt = 42;
+    kprintf("wrote to %p, unmapping it and writing again...\n", (void *)virt);
+    vmm_free_pages(as, virt, 1);
+    *(volatile uint64_t *)virt = 43;   // must fault (stale TLB entry would hide it)
+    kprintf("not reached\n");
+    ktest_finish(false);
+}
+
+// Code in a no-execute (data) page must not run.
+void test_nx(void) {
+    struct address_space *as = vmm_kernel_space();
+    uint64_t virt = VIRT_TEST_START + 0x9000;
+    vmm_alloc_pages(as, virt, 1, PTE_WRITE | PTE_NX);
+    *(volatile uint8_t *)virt = 0xC3;   // x86 "ret" instruction
+    kprintf("calling code in an NX page at %p...\n", (void *)virt);
+    ((void (*)(void))virt)();
+    kprintf("not reached\n");
+    ktest_finish(false);
+}
+
+// Writing to .rodata must fault, even in ring 0 (CR0.WP).
+void test_wp(void) {
+    static const char message[] = "read only";
+    kprintf("writing to .rodata at %p...\n", (void *)message);
+    *(volatile char *)message = 'X';
+    kprintf("not reached\n");
+    ktest_finish(false);
+}
+
+// NULL pointer: nothing is mapped at address 0.
+void test_null(void) {
+    volatile uint64_t *ptr = (volatile uint64_t *)0;
+    kprintf("reading NULL...\n");
+    uint64_t value = *ptr;
+    kprintf("not reached: %lx\n", value);
+    ktest_finish(false);
+}

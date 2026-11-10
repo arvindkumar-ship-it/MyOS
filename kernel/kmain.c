@@ -16,6 +16,7 @@
 #include "drivers/keyboard.h"
 #include "drivers/input.h"
 #include "mm/pmm.h"
+#include "mm/vmm.h"
 #include "tests/ktest.h"
 
 // Stage 4 demo: echo typed characters (keyboard or serial) and show the
@@ -87,6 +88,7 @@ void kmain(void) {
 
     // Stage 5: memory management.
     pmm_init();
+    vmm_init();
 
     // Automatic tests (only when booted with "test=...").
     ktest_run();

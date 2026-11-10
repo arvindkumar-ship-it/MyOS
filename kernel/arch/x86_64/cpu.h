@@ -80,3 +80,20 @@ static inline uint64_t cpu_rdmsr(uint32_t msr) {
 static inline void cpu_wrmsr(uint32_t msr, uint64_t value) {
     asm volatile ("wrmsr" : : "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32)));
 }
+
+// CR0 bit 16 (WP): when set, ring 0 also respects read-only pages.
+#define CR0_WP (1ul << 16)
+
+static inline uint64_t cpu_read_cr0(void) {
+    uint64_t value;
+    asm volatile ("mov %%cr0, %0" : "=r"(value));
+    return value;
+}
+
+static inline void cpu_write_cr0(uint64_t value) {
+    asm volatile ("mov %0, %%cr0" : : "r"(value) : "memory");
+}
+
+// EFER MSR: bit 11 (NXE) enables the No-Execute bit in page tables.
+#define MSR_EFER 0xC0000080
+#define EFER_NXE (1ul << 11)
