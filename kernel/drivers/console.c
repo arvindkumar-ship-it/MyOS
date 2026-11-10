@@ -34,6 +34,7 @@ static uint32_t glyph_height;
 static uint64_t cursor_col, cursor_row;
 static uint64_t cols, rows;
 static uint32_t fg_color, bg_color;
+static bool ready = false;
 
 bool console_init(void) {
     font = (const struct psf1_header *)font_psf_start;
@@ -60,7 +61,12 @@ bool console_init(void) {
     bg_color = fb_rgb(0x10, 0x10, 0x30);   // dark blue background
 
     fb_clear(bg_color);
+    ready = true;
     return true;
+}
+
+bool console_is_ready(void) {
+    return ready;
 }
 
 // Draw one glyph with its top-left corner at character cell (col, row).
