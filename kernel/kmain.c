@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <limine.h>
 
+#include "drivers/serial.h"
+
 // ---------------------------------------------------------------------------
 // Limine requests
 //
@@ -65,14 +67,20 @@ static void fb_draw_test_pattern(struct limine_framebuffer *fb) {
 // Kernel entry point. Limine jumps here in 64-bit long mode,
 // with paging on and the kernel mapped at 0xffffffff80000000.
 void kmain(void) {
+    // Serial first, so every later step can log what it is doing.
+    serial_init();
+    serial_write("Hello from MyOS\n");
+
     // Make sure the bootloader understands our protocol revision.
     if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision)) {
+        serial_write("error: Limine base revision not supported\n");
         hcf();
     }
 
     // Make sure we actually got a framebuffer.
     if (framebuffer_request.response == NULL
         || framebuffer_request.response->framebuffer_count < 1) {
+        serial_write("error: no framebuffer from Limine\n");
         hcf();
     }
 
@@ -80,6 +88,7 @@ void kmain(void) {
 
     // We only handle 32 bits-per-pixel RGB with 8-bit channels.
     if (fb->memory_model != LIMINE_FRAMEBUFFER_RGB || fb->bpp != 32) {
+        serial_write("error: framebuffer is not 32-bit RGB\n");
         hcf();
     }
 
