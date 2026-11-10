@@ -1,0 +1,10 @@
+# Build output
+build/
+iso_root/
+*.iso
+
+# Downloaded dependencies (Limine binaries, limine.h)
+deps/
+
+# QEMU debug log
+qemu.log
