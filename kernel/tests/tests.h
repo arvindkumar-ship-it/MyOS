@@ -42,6 +42,13 @@ void test_deadlock(void);
 void test_stack_overflow(void);
 void test_task_leak(void);
 
+// Stage 7
+void test_user_hello(void);
+void test_user_crash(void);
+void test_user_badptr(void);
+void test_user_read(void);
+void test_user_leak(void);
+
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
@@ -72,4 +79,9 @@ void test_task_leak(void);
     { "race",    test_race }, \
     { "deadlock", test_deadlock }, \
     { "stack_overflow", test_stack_overflow }, \
-    { "task_leak", test_task_leak },
+    { "task_leak", test_task_leak }, \
+    { "user_hello", test_user_hello }, \
+    { "user_crash", test_user_crash }, \
+    { "user_badptr", test_user_badptr }, \
+    { "user_read", test_user_read }, \
+    { "user_leak", test_user_leak },

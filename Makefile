@@ -83,6 +83,10 @@ C_SRCS   := $(shell find kernel -name '*.c')
 ASM_SRCS := $(shell find kernel -name '*.asm')
 OBJS := $(C_SRCS:%.c=$(BUILD_DIR)/%.o) $(ASM_SRCS:%.asm=$(BUILD_DIR)/%.asm.o)
 
+# User programs in assembly (Stage 7): flat binaries loaded at 0x400000.
+USER_ASM_SRCS := $(wildcard user/asm/*.asm)
+USER_ASM_BINS := $(USER_ASM_SRCS:user/asm/%.asm=$(BUILD_DIR)/user/%.bin)
+
 # ---------------------------------------------------------------------------
 # QEMU (commands from docs/os-kernel-guide.md)
 # ---------------------------------------------------------------------------
@@ -118,6 +122,14 @@ $(BUILD_DIR)/%.o: %.c | $(LIMINE_H_DIR)
 $(BUILD_DIR)/%.asm.o: %.asm
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) -MD $(@:.o=.d) $< -o $@
+
+# Assemble a user program as a flat binary (-f bin: raw bytes, no ELF).
+$(BUILD_DIR)/user/%.bin: user/asm/%.asm user/include/syscall.inc
+	@mkdir -p $(dir $@)
+	$(AS) -f bin -I user/include/ $< -o $@
+
+# The kernel embeds the user programs with incbin, so they must exist first.
+$(BUILD_DIR)/kernel/proc/builtin_programs.asm.o: $(USER_ASM_BINS)
 
 # Link all objects into the kernel ELF, using our linker script.
 $(KERNEL): $(OBJS) linker.ld

@@ -4,6 +4,7 @@
 #include "arch/x86_64/idt.h"
 #include "arch/x86_64/gdt.h"
 #include "mm/vmm.h"
+#include "sched/task.h"
 #include "arch/x86_64/cpu.h"
 #include "lib/kprintf.h"
 #include "lib/panic.h"
@@ -81,8 +82,30 @@ static void print_selector_error(const struct interrupt_frame *f) {
             table, (e >> 3) & 0x1FFF, e & 0xFFF8, (e & 1) ? ", external" : "");
 }
 
+// An exception in ring 3 is the user program's fault, not the kernel's:
+// report it, kill that process, and let every other task go on.
+static void user_exception(struct interrupt_frame *f, const char *name) {
+    struct task *t = task_current();
+    kprintf("\n[process '%s' (pid %lu) killed: %s at RIP=%p",
+            t->name, t->id, name, (void *)f->rip);
+    if (f->vector == 14) {
+        kprintf(", address %p (%s, %s)", (void *)cpu_read_cr2(),
+                (f->error_code & 1) ? "protection violation" : "not present",
+                (f->error_code & 16) ? "execute" : (f->error_code & 2) ? "write" : "read");
+    } else if (f->error_code != 0) {
+        kprintf(", error code %lx", f->error_code);
+    }
+    kprintf("]\n");
+    // Exit code like a Unix shell shows for a signal: 128 + number.
+    task_exit(128 + (int)f->vector);
+}
+
 static void exception_fatal(struct interrupt_frame *f) {
     const char *name = exception_names[f->vector];
+
+    if ((f->cs & 3) == 3) {
+        user_exception(f, name);
+    }
 
     switch (f->vector) {
     case 0:

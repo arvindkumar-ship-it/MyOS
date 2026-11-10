@@ -9,6 +9,7 @@
 #include "lib/kprintf.h"
 #include "lib/panic.h"
 #include "arch/x86_64/cpu.h"
+#include "arch/x86_64/gdt.h"
 
 // Round-robin scheduler for one CPU.
 //
@@ -40,6 +41,11 @@ static bool preemption;
 static bool running;
 static uint64_t switch_count;
 static bool kstack_slot_used[MAX_KSTACKS];
+
+uint64_t sched_kernel_rsp;
+
+// In usermode.asm: iretq into ring 3.
+extern void enter_user_mode(uint64_t entry, uint64_t user_rsp) __attribute__((noreturn));
 
 // ---------------------------------------------------------------------------
 // Kernel stacks: each one sits at the top of a 64 KiB virtual slot. The pages
@@ -118,6 +124,9 @@ static void reap(struct task *t) {
         *pp = t->all_next;
     }
     kstack_free(t);
+    if (t->is_user) {
+        vmm_destroy_user_space(t->as);   // all its pages and page tables
+    }
     kfree(t);
 }
 
@@ -156,6 +165,12 @@ static void schedule(void) {
     switch_count++;
     if (next->as != prev->as) {
         vmm_switch(next->as);
+    }
+    // An interrupt (or syscall) from ring 3 must land on the kernel stack of
+    // the task that is running. The CPU takes that stack from TSS.rsp0.
+    if (next->virt_kstack_top != 0) {
+        tss_set_rsp0(next->virt_kstack_top);
+        sched_kernel_rsp = next->virt_kstack_top;
     }
     last_prev = prev;
     switch_context(&prev->saved_rsp, next->saved_rsp);
@@ -222,7 +237,8 @@ static struct task *task_alloc(const char *name) {
     return t;
 }
 
-struct task *task_create(const char *name, void (*fn)(void *), void *arg) {
+// Create a task but do not start it yet (the caller fills in more fields).
+static struct task *task_create_stopped(const char *name, void (*fn)(void *), void *arg) {
     struct task *t = task_alloc(name);
     if (t == NULL) {
         return NULL;
@@ -244,12 +260,44 @@ struct task *task_create(const char *name, void (*fn)(void *), void *arg) {
     *--sp = 0;                           // r14
     *--sp = 0;                           // r15
     t->saved_rsp = (uint64_t)sp;
+    return t;
+}
 
+static void task_start(struct task *t) {
     bool was_enabled = cpu_irq_save();
     t->all_next = all_tasks;
     all_tasks = t;
     make_ready(t);
     cpu_irq_restore(was_enabled);
+}
+
+struct task *task_create(const char *name, void (*fn)(void *), void *arg) {
+    struct task *t = task_create_stopped(name, fn, arg);
+    if (t != NULL) {
+        task_start(t);
+    }
+    return t;
+}
+
+// Kernel-side start of every user process: we are already on its address
+// space (schedule() loaded its CR3), so just drop to ring 3.
+static void user_task_start(void *arg) {
+    (void)arg;
+    cpu_cli();   // iretq will turn interrupts on again (RFLAGS.IF in the frame)
+    enter_user_mode(current->user_entry, current->user_stack_top);
+}
+
+struct task *task_create_user(const char *name, struct address_space *as,
+                              uint64_t entry, uint64_t user_rsp) {
+    struct task *t = task_create_stopped(name, user_task_start, NULL);
+    if (t == NULL) {
+        return NULL;
+    }
+    t->is_user = true;
+    t->as = as;
+    t->user_entry = entry;
+    t->user_stack_top = user_rsp;
+    task_start(t);
     return t;
 }
 
@@ -357,6 +405,19 @@ void task_for_each(void (*fn)(struct task *t, void *ctx), void *ctx) {
         fn(t, ctx);
     }
     cpu_irq_restore(was_enabled);
+}
+
+bool task_exists(uint64_t id) {
+    bool found = false;
+    bool was_enabled = cpu_irq_save();
+    for (struct task *t = all_tasks; t != NULL; t = t->all_next) {
+        if (t->id == id) {
+            found = true;
+            break;
+        }
+    }
+    cpu_irq_restore(was_enabled);
+    return found;
 }
 
 const char *task_state_name(enum task_state s) {

@@ -229,6 +229,53 @@ TESTS = [
 
     dict(name="task_leak", steps=[("expect", "100 tasks done: page leak 0, heap allocation leak 0"),
                                   ("expect", "TEST PASS: task_leak")], forbid=[PANIC_RE], exit=3),
+
+    # Stage 7: a user program in ring 3 uses write/getpid/sleep/exit.
+    dict(name="user_hello", steps=[
+        ("expect", "[process 'hello' started"),
+        ("expect", "Hello from user mode!"),
+        ("expect", "running in ring 3"),
+        ("expect_re", r"pid = \d+"),
+        ("expect", "tick\r\ntick\r\ntick"),
+        ("expect_re", r"\[process 'hello' \(pid \d+\) exited with code 0\]"),
+        ("expect", "TEST PASS: user_hello"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    # Stage 7 Done test: user programs crash, the kernel kills them and lives on.
+    dict(name="user_crash", steps=[
+        ("expect", "crash_null: reading address 0..."),
+        ("expect_re", r"\[process 'crash_null' \(pid \d+\) killed: Page fault at RIP=0x0000000000400\w+, "
+                      r"address 0x0000000000000000 \(not present, read\)\]"),
+        ("expect", "crash_priv: trying cli in ring 3..."),
+        ("expect_re", r"\[process 'crash_priv' \(pid \d+\) killed: General protection fault"),
+        ("expect", "crash_kernel: writing to kernel memory..."),
+        ("expect_re", r"\[process 'crash_kernel' \(pid \d+\) killed: Page fault at RIP=0x0000000000400\w+, "
+                      r"address 0xffffffff80001000 \(protection violation, write\)\]"),
+        ("expect", "Hello from user mode!"),
+        ("expect", "kernel still alive after 3 crashed processes"),
+        ("expect", "TEST PASS: user_crash"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="user_badptr", steps=[
+        ("expect", "badptr: all bad pointers rejected with EFAULT"),
+        ("expect", "TEST PASS: user_badptr"),
+    ], forbid=[PANIC_RE, r"accepted a bad pointer"], exit=3),
+
+    dict(name="user_read", steps=[
+        ("expect", "reader: type lines, 'q' quits"),
+        ("serial", "hello kernel\r"),
+        ("expect", "hello kernel"),
+        ("keys", "typed\n"),
+        ("expect", "typed"),
+        ("serial", "q\r"),
+        ("expect_re", r"\[process 'reader' \(pid \d+\) exited with code 7\]"),
+        ("expect", "TEST PASS: user_read"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="user_leak", steps=[
+        ("expect", "20 processes: page leak 0, heap leak 0, page-table leak 0"),
+        ("expect", "TEST PASS: user_leak"),
+    ], forbid=[PANIC_RE], exit=3),
 ]
 
 # ---------------------------------------------------------------------------

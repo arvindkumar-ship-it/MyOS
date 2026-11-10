@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include "mm/memory.h"
 #include "mm/pmm.h"
+#include "mm/heap.h"
 #include "lib/string.h"
 #include "lib/kprintf.h"
 #include "lib/panic.h"
@@ -175,6 +176,82 @@ struct address_space *vmm_kernel_space(void) {
 
 uint64_t vmm_table_pages(void) {
     return table_pages;
+}
+
+struct address_space *vmm_create_user_space(void) {
+    struct address_space *as = kmalloc(sizeof(*as));
+    if (as == NULL) {
+        return NULL;
+    }
+    as->phys_pml4 = pmm_alloc_page_zeroed();
+    if (as->phys_pml4 == 0) {
+        kfree(as);
+        return NULL;
+    }
+    bool was_enabled = cpu_irq_save();
+    table_pages++;
+    uint64_t *pml4 = table_virt(as->phys_pml4);
+    uint64_t *kernel_pml4 = table_virt(kernel_space.phys_pml4);
+    for (int i = KERNEL_PML4_FIRST; i < ENTRIES_PER_TABLE; i++) {
+        pml4[i] = kernel_pml4[i];   // share the kernel's PDPTs (never freed)
+    }
+    cpu_irq_restore(was_enabled);
+    return as;
+}
+
+// Free a table at "level" (3 = PDPT, 2 = PD, 1 = PT) and everything under it.
+// At level 1 the entries point to the user's data pages, which are freed too.
+static void free_table(uint64_t phys_table, int level) {
+    uint64_t *table = table_virt(phys_table);
+    for (int i = 0; i < ENTRIES_PER_TABLE; i++) {
+        uint64_t entry = table[i];
+        if (!(entry & PTE_PRESENT)) {
+            continue;
+        }
+        if (level == 1) {
+            pmm_free_page(entry & PTE_ADDR_MASK);
+        } else {
+            free_table(entry & PTE_ADDR_MASK, level - 1);
+        }
+    }
+    pmm_free_page(phys_table);
+    table_pages--;
+}
+
+void vmm_destroy_user_space(struct address_space *as) {
+    if (as == &kernel_space || is_current(as)) {
+        panic("vmm_destroy_user_space: address space is in use");
+    }
+    bool was_enabled = cpu_irq_save();
+    uint64_t *pml4 = table_virt(as->phys_pml4);
+    // Only the user half: the kernel half belongs to everyone.
+    for (int i = 0; i < KERNEL_PML4_FIRST; i++) {
+        if (pml4[i] & PTE_PRESENT) {
+            free_table(pml4[i] & PTE_ADDR_MASK, 3);
+        }
+    }
+    pmm_free_page(as->phys_pml4);
+    table_pages--;
+    cpu_irq_restore(was_enabled);
+    kfree(as);
+}
+
+bool vmm_user_range_ok(struct address_space *as, uint64_t virt, uint64_t len, bool write) {
+    if (len == 0) {
+        return true;
+    }
+    uint64_t end = virt + len;
+    // end < virt: the addition wrapped around (e.g. len = huge).
+    if (end < virt || end > VIRT_USER_END) {
+        return false;
+    }
+    for (uint64_t page = ALIGN_DOWN(virt, PAGE_SIZE); page < end; page += PAGE_SIZE) {
+        uint64_t flags = vmm_get_flags(as, page);
+        if (!(flags & PTE_PRESENT) || !(flags & PTE_USER) || (write && !(flags & PTE_WRITE))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Map a range of the kernel image: VIRTUAL [virt_start, virt_end) to where

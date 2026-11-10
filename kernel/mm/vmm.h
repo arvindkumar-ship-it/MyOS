@@ -76,6 +76,21 @@ bool vmm_alloc_pages(struct address_space *as, uint64_t virt, uint64_t count, ui
 // Unmap "count" pages at virt and give their physical pages back to the PMM.
 void vmm_free_pages(struct address_space *as, uint64_t virt, uint64_t count);
 
+// --- User address spaces (one per process) ---
+
+// New address space: empty user half (PML4 entries 0-255), kernel half
+// (entries 256-511) pointing to the SAME tables as the kernel space, so the
+// kernel is mapped identically in every process. Returns NULL if out of memory.
+struct address_space *vmm_create_user_space(void);
+
+// Free every user page, every user page table, the PML4 and the struct.
+// Must not be the address space in CR3.
+void vmm_destroy_user_space(struct address_space *as);
+
+// Is [virt, virt + len) inside user space, mapped with PTE_USER, and also
+// writable if "write"? Used to check pointers that come from user programs.
+bool vmm_user_range_ok(struct address_space *as, uint64_t virt, uint64_t len, bool write);
+
 // Load an address space into CR3.
 void vmm_switch(struct address_space *as);
 

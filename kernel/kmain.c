@@ -19,6 +19,9 @@
 #include "mm/vmm.h"
 #include "mm/heap.h"
 #include "sched/task.h"
+#include "syscall/syscall.h"
+#include "proc/process.h"
+#include "proc/programs.h"
 #include "tests/ktest.h"
 
 // ---------------------------------------------------------------------------
@@ -86,6 +89,7 @@ void kmain(void) {
     kprintf("GDT + TSS loaded\n");
     interrupts_init();
     kprintf("IDT loaded (256 vectors)\n");
+    syscall_init();
 
     // Stage 4: hardware interrupts. PIC remap -> IRQ 0-15 = vectors 32-47.
     irq_init();

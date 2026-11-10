@@ -27,6 +27,10 @@ struct task {
     uint64_t virt_kstack_top;     // first address above the stack
     struct address_space *as;     // page tables used while this task runs
 
+    bool is_user;                 // user process: runs in ring 3 with its own address space
+    uint64_t user_entry;          // user mode: first instruction (VIRTUAL, user half)
+    uint64_t user_stack_top;      // user mode: initial stack pointer
+
     uint64_t wake_tick;           // TASK_SLEEPING: wake up at this pit_ticks() value
     uint64_t ticks_used;          // timer ticks spent running (for ps)
     int exit_code;
@@ -48,6 +52,11 @@ void sched_start_preemption(void);
 
 // New kernel thread running fn(arg). Returns NULL if out of memory.
 struct task *task_create(const char *name, void (*fn)(void *), void *arg);
+
+// New user process task: runs in ring 3 at "entry" with stack "user_rsp",
+// using address space "as" (the task owns it and frees it when it dies).
+struct task *task_create_user(const char *name, struct address_space *as,
+                              uint64_t entry, uint64_t user_rsp);
 
 // The task running on the CPU.
 struct task *task_current(void);
@@ -85,8 +94,15 @@ void task_for_each(void (*fn)(struct task *t, void *ctx), void *ctx);
 
 const char *task_state_name(enum task_state s);
 
+// True while a task with this id exists (also as a zombie not yet freed).
+bool task_exists(uint64_t id);
+
 // Number of context switches so far.
 uint64_t sched_switch_count(void);
+
+// Top of the current task's kernel stack. The syscall entry code switches to
+// it (syscall does not switch stacks by itself, unlike interrupts).
+extern uint64_t sched_kernel_rsp;
 
 // True after sched_init().
 bool sched_running(void);
