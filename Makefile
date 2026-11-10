@@ -3,6 +3,8 @@
 #   make          build myos.iso
 #   make run      boot the ISO in QEMU, serial output on this terminal
 #   make debug    same, but QEMU waits for gdb on :1234 and logs interrupts to qemu.log
+#   make test     boot every in-kernel test headless and check the serial output
+#                 (one test: make test T=div0)
 #   make clean    remove build output
 #   make distclean  also remove downloaded deps
 
@@ -28,6 +30,11 @@ LIMINE_H_DIR    := $(DEPS_DIR)/limine-protocol/include
 BUILD_DIR := build
 KERNEL    := $(BUILD_DIR)/myos.elf
 ISO       := myos.iso
+
+# Kernel command line and boot menu timeout, written into limine.conf.
+# Example: make run CMDLINE="test=div0"
+CMDLINE ?=
+TIMEOUT ?= 3
 
 # ---------------------------------------------------------------------------
 # Toolchain and flags
@@ -76,12 +83,14 @@ OBJS := $(C_SRCS:%.c=$(BUILD_DIR)/%.o) $(ASM_SRCS:%.asm=$(BUILD_DIR)/%.asm.o)
 # QEMU (commands from docs/os-kernel-guide.md)
 # ---------------------------------------------------------------------------
 QEMU      := qemu-system-x86_64
-QEMUFLAGS := -cdrom $(ISO) -m 512M -serial stdio -no-reboot -no-shutdown
+QEMUFLAGS := -cdrom $(ISO) -m 512M -serial stdio -no-reboot -no-shutdown \
+    -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# isa-debug-exit: lets the kernel quit QEMU (used by tests, see kernel/drivers/qemu.c).
 
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all run debug clean distclean
+.PHONY: all run debug test clean distclean
 
 all: $(ISO)
 
@@ -90,6 +99,11 @@ run: $(ISO)
 
 debug: $(ISO)
 	$(QEMU) $(QEMUFLAGS) -s -S -d int,cpu_reset -D qemu.log
+
+# Headless tests. The script rebuilds the ISO with "test=<name>" for each test.
+T ?=
+test: $(KERNEL) $(LIMINE_TOOL)
+	python3 -I tools/qemu-test.py $(T)
 
 # Compile one C file. Objects depend on limine.h being downloaded first.
 $(BUILD_DIR)/%.o: %.c | $(LIMINE_H_DIR)
@@ -109,11 +123,26 @@ $(KERNEL): $(OBJS) linker.ld
 #  1. lay out the files in iso_root/
 #  2. xorriso turns the folder into an ISO with an El Torito (CD) boot image
 #  3. "limine bios-install" patches the ISO so BIOS can boot it from a hard disk/USB too
-$(ISO): $(KERNEL) limine.conf $(LIMINE_TOOL)
+# limine.conf with @TIMEOUT@ and @CMDLINE@ filled in.
+# config.stamp holds the current values; it is rewritten only when they change,
+# so changing CMDLINE rebuilds the ISO but an unchanged one does not.
+CONFIG_STAMP := $(BUILD_DIR)/config.stamp
+CONFIG_NOW   := TIMEOUT=$(TIMEOUT) CMDLINE=$(CMDLINE)
+ifneq ($(shell cat $(CONFIG_STAMP) 2>/dev/null),$(CONFIG_NOW))
+.PHONY: $(CONFIG_STAMP)
+endif
+$(CONFIG_STAMP):
+	@mkdir -p $(dir $@)
+	@echo '$(CONFIG_NOW)' > $@
+
+$(BUILD_DIR)/limine.conf: limine.conf $(CONFIG_STAMP)
+	sed -e 's|@TIMEOUT@|$(TIMEOUT)|' -e 's|@CMDLINE@|$(CMDLINE)|' $< > $@
+
+$(ISO): $(KERNEL) $(BUILD_DIR)/limine.conf $(LIMINE_TOOL)
 	rm -rf iso_root
 	mkdir -p iso_root/boot/limine iso_root/EFI/BOOT
 	cp $(KERNEL) iso_root/boot/kernel
-	cp limine.conf iso_root/boot/limine/
+	cp $(BUILD_DIR)/limine.conf iso_root/boot/limine/limine.conf
 	cp $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
 	   $(LIMINE_DIR)/limine-uefi-cd.bin iso_root/boot/limine/
 	cp $(LIMINE_DIR)/BOOTX64.EFI iso_root/EFI/BOOT/
