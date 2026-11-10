@@ -1,0 +1,3 @@
+MyOS is a hobby x86_64 kernel written in C for learning.
+Stages: boot, kprintf, GDT/IDT, timer+keyboard, memory,
+multitasking, user mode, filesystem, ELF, shell.

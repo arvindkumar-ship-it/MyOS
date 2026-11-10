@@ -22,6 +22,9 @@
 #include "syscall/syscall.h"
 #include "proc/process.h"
 #include "proc/programs.h"
+#include "fs/vfs.h"
+#include "fs/tarfs.h"
+#include "fs/devfs.h"
 #include "tests/ktest.h"
 
 // ---------------------------------------------------------------------------
@@ -51,6 +54,21 @@ static void echo_thread(void *arg) {
 static void count_task(struct task *t, void *ctx) {
     (void)t;
     (*(int *)ctx)++;
+}
+
+// Find the initrd module Limine loaded and mount it at "/".
+static void mount_initrd(void) {
+    for (uint64_t i = 0; i < boot_info.module_count; i++) {
+        struct boot_module *m = &boot_info.modules[i];
+        kprintf("module: %s, %lu bytes at %p\n", m->path, m->size, m->virt_addr);
+        int entries = tarfs_mount(vfs_root(), m->virt_addr, m->size);
+        if (entries < 0) {
+            panic("initrd '%s' is not a valid tar archive", m->path);
+        }
+        kprintf("initrd mounted at /: %d files and directories\n", entries);
+        return;
+    }
+    kprintf("warning: no initrd module, / is empty\n");
 }
 
 // Kernel entry point. Limine jumps here in 64-bit long mode,
@@ -108,6 +126,11 @@ void kmain(void) {
     sched_init();
     sched_start_preemption();
     kprintf("scheduler running (round robin, 50 ms time slice)\n");
+
+    // Stage 8: VFS with the initrd (tar) as "/" and devices under /dev.
+    vfs_init();
+    mount_initrd();
+    devfs_init();
 
     // Automatic tests (only when booted with "test=...").
     ktest_run();

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include "sched/task.h"
 
 // User processes.
@@ -23,6 +24,9 @@ struct task *process_spawn_flat(const char *name, const void *image, size_t size
 // Copy "len" bytes into another address space at "virt" (pages must be mapped).
 // Goes through the HHDM, so it works whatever CR3 currently holds.
 void process_copy_to(struct address_space *as, uint64_t virt, const void *src, size_t len);
+
+// Open /dev/console as fd 0, 1 and 2 of a new process.
+bool process_open_console(struct task *t);
 
 // Map the user stack in "as". Returns the initial stack pointer, or 0.
 uint64_t process_map_stack(struct address_space *as);

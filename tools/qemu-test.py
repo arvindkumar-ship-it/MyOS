@@ -282,6 +282,27 @@ TESTS = [
         ("expect", "TEST PASS: user_syscall"),
     ], forbid=[PANIC_RE], exit=3, timeout=60),
 
+    # Stage 8: VFS over the initrd.
+    dict(name="vfs", steps=[
+        ("expect", "initrd mounted at /: 6 files and directories"),
+        ("expect", "  docs/\r\n    about.txt (162 bytes)\r\n  etc/\r\n    motd (53 bytes)\r\n"
+                   "  hello.txt (59 bytes)\r\n  dev/\r\n    console (device)\r\n    null (device)"),
+        ("expect", "/hello.txt (59 bytes): Hello from the initrd!"),
+        ("expect", "lookup with . and ..: same node"),
+        ("expect", "error cases (ENOENT, EROFS, EISDIR, file as dir): ok"),
+        ("expect", "read about.txt in 7-byte pieces: 162 bytes (size 162)"),
+        ("expect", "TEST PASS: vfs"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    # Stage 8 Done test: /hello.txt opened and read (by a user program).
+    dict(name="user_cat", steps=[
+        ("expect", "cat_hello: opened /hello.txt as fd 3"),
+        ("expect", "Hello from the initrd! This file was read through the VFS."),
+        ("expect", "cat_hello: error checks ok (EBADF, ENOENT, EFAULT)"),
+        ("expect", "heap allocation leak after the process: 0"),
+        ("expect", "TEST PASS: user_cat"),
+    ], forbid=[PANIC_RE, "FAILED"], exit=3),
+
     dict(name="user_leak", steps=[
         ("expect", "20 processes: page leak 0, heap leak 0, page-table leak 0"),
         ("expect", "TEST PASS: user_leak"),

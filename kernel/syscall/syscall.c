@@ -6,8 +6,9 @@
 #include "arch/x86_64/idt.h"
 #include "sched/task.h"
 #include "mm/vmm.h"
-#include "drivers/input.h"
 #include "drivers/pit.h"
+#include "fs/vfs.h"
+#include "mm/memory.h"
 #include "lib/kprintf.h"
 #include "arch/x86_64/cpu.h"
 #include "arch/x86_64/gdt.h"
@@ -45,39 +46,91 @@ static bool user_ok(uint64_t ptr, uint64_t len, bool write) {
 // The syscalls
 // ---------------------------------------------------------------------------
 
+// Copy a '\0'-terminated string from user memory into buf (at most size
+// bytes with the '\0'). Checks every byte's page before reading it.
+// Returns the length, -EFAULT, or -ENAMETOOLONG.
+static int64_t copy_user_string(uint64_t user_ptr, char *buf, uint64_t size) {
+    for (uint64_t i = 0; i < size; i++) {
+        uint64_t addr = user_ptr + i;
+        // Check once per page (and for the very first byte).
+        if (i == 0 || (addr & (PAGE_SIZE - 1)) == 0) {
+            if (!user_ok(addr, 1, false)) {
+                return -EFAULT;
+            }
+        }
+        buf[i] = *(const char *)addr;
+        if (buf[i] == '\0') {
+            return (int64_t)i;
+        }
+    }
+    return -ENAMETOOLONG;
+}
+
+// The open file behind fd, or NULL.
+static struct file *fd_get(uint64_t fd) {
+    if (fd >= TASK_MAX_FDS) {
+        return NULL;
+    }
+    return task_current()->fds[fd];
+}
+
 static int64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len) {
-    if (fd != 1 && fd != 2) {
+    struct file *f = fd_get(fd);
+    if (f == NULL) {
         return -EBADF;
     }
     if (!user_ok(buf, len, false)) {
         return -EFAULT;
     }
-    const char *s = (const char *)buf;   // safe now: checked, and in our CR3
-    for (uint64_t i = 0; i < len; i++) {
-        kprintf("%c", s[i]);
-    }
-    return (int64_t)len;
+    // Safe now: the range is checked, and it is in the current CR3.
+    return vfs_write(f, (const void *)buf, len);
 }
 
 static int64_t sys_read(uint64_t fd, uint64_t buf, uint64_t len) {
-    if (fd != 0) {
+    struct file *f = fd_get(fd);
+    if (f == NULL) {
         return -EBADF;
-    }
-    if (len == 0) {
-        return 0;
     }
     if (!user_ok(buf, len, true)) {
         return -EFAULT;
     }
-    char *dst = (char *)buf;
-    // Wait for the first character, then take whatever else is already there.
-    uint64_t n = 0;
-    dst[n++] = input_getc();
-    char c;
-    while (n < len && input_try_getc(&c)) {
-        dst[n++] = c;
+    return vfs_read(f, (void *)buf, len);
+}
+
+static int64_t sys_open(uint64_t user_path, uint64_t flags) {
+    char path[256];
+    int64_t len = copy_user_string(user_path, path, sizeof(path));
+    if (len < 0) {
+        return len;
     }
-    return (int64_t)n;
+    struct task *t = task_current();
+    int fd = -1;
+    for (int i = 0; i < TASK_MAX_FDS; i++) {
+        if (t->fds[i] == NULL) {
+            fd = i;
+            break;
+        }
+    }
+    if (fd < 0) {
+        return -EMFILE;
+    }
+    int64_t err;
+    struct file *f = vfs_open(path, (int)flags, &err);
+    if (f == NULL) {
+        return err;
+    }
+    t->fds[fd] = f;
+    return fd;
+}
+
+static int64_t sys_close(uint64_t fd) {
+    struct file *f = fd_get(fd);
+    if (f == NULL) {
+        return -EBADF;
+    }
+    task_current()->fds[fd] = NULL;
+    vfs_close(f);
+    return 0;
 }
 
 static int64_t sys_exit(uint64_t code) {
@@ -97,6 +150,8 @@ int64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
     case SYS_GETPID: return (int64_t)task_current()->id;
     case SYS_SLEEP:  task_sleep_ms(a1); return 0;
     case SYS_UPTIME: return (int64_t)pit_uptime_ms();
+    case SYS_OPEN:   return sys_open(a1, a2);
+    case SYS_CLOSE:  return sys_close(a1);
     default:         return -ENOSYS;
     }
 }

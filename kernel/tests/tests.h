@@ -50,6 +50,10 @@ void test_user_read(void);
 void test_user_leak(void);
 void test_user_syscall(void);
 
+// Stage 8
+void test_vfs(void);
+void test_user_cat(void);
+
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
@@ -86,4 +90,6 @@ void test_user_syscall(void);
     { "user_badptr", test_user_badptr }, \
     { "user_read", test_user_read }, \
     { "user_leak", test_user_leak }, \
-    { "user_syscall", test_user_syscall },
+    { "user_syscall", test_user_syscall }, \
+    { "vfs",     test_vfs }, \
+    { "user_cat", test_user_cat },

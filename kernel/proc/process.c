@@ -4,6 +4,7 @@
 #include "mm/vmm.h"
 #include "lib/string.h"
 #include "lib/kprintf.h"
+#include "fs/vfs.h"
 
 void process_copy_to(struct address_space *as, uint64_t virt, const void *src, size_t len) {
     const uint8_t *from = src;
@@ -26,6 +27,21 @@ uint64_t process_map_stack(struct address_space *as) {
         return 0;
     }
     return USER_STACK_TOP;
+}
+
+bool process_open_console(struct task *t) {
+    int64_t err;
+    struct file *console = vfs_open("/dev/console", O_RDWR, &err);
+    if (console == NULL) {
+        return false;
+    }
+    // fd 0 (stdin), 1 (stdout), 2 (stderr) all share one open file.
+    t->fds[0] = console;
+    vfs_file_ref(console);
+    t->fds[1] = console;
+    vfs_file_ref(console);
+    t->fds[2] = console;
+    return true;
 }
 
 struct task *process_spawn_flat(const char *name, const void *image, size_t size) {
@@ -52,6 +68,10 @@ struct task *process_spawn_flat(const char *name, const void *image, size_t size
         vmm_destroy_user_space(as);
         return NULL;
     }
+    if (!process_open_console(t)) {
+        kprintf("process: cannot open /dev/console for '%s'\n", name);
+    }
+    task_start(t);
     kprintf("[process '%s' started: pid %lu, %lu bytes at %p]\n",
             name, t->id, size, (void *)USER_CODE_BASE);
     return t;

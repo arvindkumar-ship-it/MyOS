@@ -10,6 +10,7 @@
 #include "lib/panic.h"
 #include "arch/x86_64/cpu.h"
 #include "arch/x86_64/gdt.h"
+#include "fs/vfs.h"
 
 // Round-robin scheduler for one CPU.
 //
@@ -263,7 +264,7 @@ static struct task *task_create_stopped(const char *name, void (*fn)(void *), vo
     return t;
 }
 
-static void task_start(struct task *t) {
+void task_start(struct task *t) {
     bool was_enabled = cpu_irq_save();
     t->all_next = all_tasks;
     all_tasks = t;
@@ -297,7 +298,6 @@ struct task *task_create_user(const char *name, struct address_space *as,
     t->as = as;
     t->user_entry = entry;
     t->user_stack_top = user_rsp;
-    task_start(t);
     return t;
 }
 
@@ -367,6 +367,13 @@ void task_exit(int code) {
         panic("task_exit: task '%s' must not exit", current->name);
     }
     current->exit_code = code;
+    // Close every open file of the task (drops its references).
+    for (int i = 0; i < TASK_MAX_FDS; i++) {
+        if (current->fds[i] != NULL) {
+            vfs_close(current->fds[i]);
+            current->fds[i] = NULL;
+        }
+    }
     current->state = TASK_ZOMBIE;   // freed by finish_switch() in the next task
     schedule();
     panic("task_exit: zombie task ran again");

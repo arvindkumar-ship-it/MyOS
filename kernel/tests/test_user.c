@@ -74,3 +74,13 @@ void test_user_leak(void) {
 void test_user_syscall(void) {
     ktest_finish(run_program("fastcall") && run_program("hello"));
 }
+
+// Done test of Stage 8: a user program opens and reads /hello.txt.
+void test_user_cat(void) {
+    uint64_t allocs_before = heap_get_stats().allocations;
+    bool ok = run_program("cat_hello");
+    task_sleep_ms(20);
+    long leak = (long)(heap_get_stats().allocations - allocs_before);
+    kprintf("heap allocation leak after the process: %ld (open file it did not close)\n", leak);
+    ktest_finish(ok && leak == 0);
+}

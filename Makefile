@@ -87,6 +87,12 @@ OBJS := $(C_SRCS:%.c=$(BUILD_DIR)/%.o) $(ASM_SRCS:%.asm=$(BUILD_DIR)/%.asm.o)
 USER_ASM_SRCS := $(wildcard user/asm/*.asm)
 USER_ASM_BINS := $(USER_ASM_SRCS:user/asm/%.asm=$(BUILD_DIR)/user/%.bin)
 
+# initrd: everything under initrd/ packed as a USTAR tar archive. Limine loads
+# it into memory as a "module"; the kernel mounts it with tarfs (Stage 8).
+INITRD       := $(BUILD_DIR)/initrd.tar
+INITRD_ROOT  := $(BUILD_DIR)/initrd-root
+INITRD_FILES := $(shell find initrd -type f)
+
 # ---------------------------------------------------------------------------
 # QEMU (commands from docs/os-kernel-guide.md)
 # ---------------------------------------------------------------------------
@@ -154,10 +160,20 @@ $(CONFIG_STAMP):
 $(BUILD_DIR)/limine.conf: limine.conf $(CONFIG_STAMP)
 	sed -e 's|@TIMEOUT@|$(TIMEOUT)|' -e 's|@CMDLINE@|$(CMDLINE)|' $< > $@
 
-$(ISO): $(KERNEL) $(BUILD_DIR)/limine.conf $(LIMINE_TOOL)
+# The initrd is built from a staging folder (initrd/ plus generated files).
+# --format=ustar: the tar layout tarfs understands. Owner 0, sorted names:
+# the same files always give the same archive.
+$(INITRD): $(INITRD_FILES)
+	rm -rf $(INITRD_ROOT)
+	mkdir -p $(INITRD_ROOT)
+	cp -r initrd/. $(INITRD_ROOT)/
+	tar --format=ustar --owner=0 --group=0 --sort=name -cf $@ -C $(INITRD_ROOT) .
+
+$(ISO): $(KERNEL) $(INITRD) $(BUILD_DIR)/limine.conf $(LIMINE_TOOL)
 	rm -rf iso_root
 	mkdir -p iso_root/boot/limine iso_root/EFI/BOOT
 	cp $(KERNEL) iso_root/boot/kernel
+	cp $(INITRD) iso_root/boot/initrd.tar
 	cp $(BUILD_DIR)/limine.conf iso_root/boot/limine/limine.conf
 	cp $(LIMINE_DIR)/limine-bios.sys $(LIMINE_DIR)/limine-bios-cd.bin \
 	   $(LIMINE_DIR)/limine-uefi-cd.bin iso_root/boot/limine/

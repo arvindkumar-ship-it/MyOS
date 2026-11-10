@@ -1,0 +1,1 @@
+Hello from the initrd! This file was read through the VFS.

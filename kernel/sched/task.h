@@ -4,6 +4,11 @@
 #include <stdbool.h>
 #include "mm/vmm.h"
 
+struct file;
+
+// Open files per task: fds[i] is file descriptor i (NULL = free).
+#define TASK_MAX_FDS 16
+
 // A task = one thread of execution with its own kernel stack.
 // (Stage 7 adds user processes: a task with its own address space.)
 
@@ -31,6 +36,8 @@ struct task {
     uint64_t user_entry;          // user mode: first instruction (VIRTUAL, user half)
     uint64_t user_stack_top;      // user mode: initial stack pointer
 
+    struct file *fds[TASK_MAX_FDS];   // open files (user processes)
+
     uint64_t wake_tick;           // TASK_SLEEPING: wake up at this pit_ticks() value
     uint64_t ticks_used;          // timer ticks spent running (for ps)
     int exit_code;
@@ -53,10 +60,15 @@ void sched_start_preemption(void);
 // New kernel thread running fn(arg). Returns NULL if out of memory.
 struct task *task_create(const char *name, void (*fn)(void *), void *arg);
 
-// New user process task: runs in ring 3 at "entry" with stack "user_rsp",
+// New user process task: will run in ring 3 at "entry" with stack "user_rsp",
 // using address space "as" (the task owns it and frees it when it dies).
+// The task is NOT started: the caller sets up more (open files...) first,
+// then calls task_start().
 struct task *task_create_user(const char *name, struct address_space *as,
                               uint64_t entry, uint64_t user_rsp);
+
+// Put a task created with task_create_user() into the run queue.
+void task_start(struct task *t);
 
 // The task running on the CPU.
 struct task *task_current(void);
