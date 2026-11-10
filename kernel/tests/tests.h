@@ -56,6 +56,12 @@ void test_user_cat(void);
 void test_disk(void);
 void test_ata(void);
 
+// Stage 9
+void test_elf_hello(void);
+void test_spawn(void);
+void test_elf_bad(void);
+void test_elf_leak(void);
+
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
@@ -96,4 +102,8 @@ void test_ata(void);
     { "vfs",     test_vfs }, \
     { "user_cat", test_user_cat }, \
     { "disk",    test_disk }, \
-    { "ata",     test_ata },
+    { "ata",     test_ata }, \
+    { "elf_hello", test_elf_hello }, \
+    { "spawn",   test_spawn }, \
+    { "elf_bad", test_elf_bad }, \
+    { "elf_leak", test_elf_leak },

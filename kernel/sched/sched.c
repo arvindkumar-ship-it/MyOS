@@ -115,8 +115,8 @@ static void make_ready(struct task *t) {
     }
 }
 
-// Free a finished task's stack and struct. Only for a task that is not running.
-static void reap(struct task *t) {
+// Remove a task from the all-tasks list and free its struct.
+static void free_task_struct(struct task *t) {
     struct task **pp = &all_tasks;
     while (*pp != NULL && *pp != t) {
         pp = &(*pp)->all_next;
@@ -124,19 +124,29 @@ static void reap(struct task *t) {
     if (*pp == t) {
         *pp = t->all_next;
     }
-    kstack_free(t);
-    if (t->is_user) {
-        vmm_destroy_user_space(t->as);   // all its pages and page tables
-    }
     kfree(t);
 }
 
+// Free what a finished task used: kernel stack and address space. The struct
+// (with the exit code) stays while a parent may still wait() for it.
+static void release_resources(struct task *t) {
+    kstack_free(t);
+    if (t->is_user) {
+        vmm_destroy_user_space(t->as);
+        t->as = NULL;
+    }
+    t->resources_freed = true;
+    if (t->parent == NULL) {
+        free_task_struct(t);   // nobody will wait for it
+    }
+}
+
 // Runs right after every switch, on the NEW task's stack. The old task's
-// stack is not in use any more, so a finished task can be freed here (a task
-// can never free its own stack while it is still running on it).
+// stack is not in use any more, so a finished task can be cleaned up here
+// (a task can never free its own stack while it is still running on it).
 static void finish_switch(void) {
     if (last_prev != NULL && last_prev->state == TASK_ZOMBIE) {
-        reap(last_prev);
+        release_resources(last_prev);
     }
     last_prev = NULL;
 }
@@ -374,7 +384,21 @@ void task_exit(int code) {
             current->fds[i] = NULL;
         }
     }
-    current->state = TASK_ZOMBIE;   // freed by finish_switch() in the next task
+    // Our children become orphans: nobody will wait for them now.
+    for (struct task *t = all_tasks; t != NULL;) {
+        struct task *next = t->all_next;
+        if (t->parent == current) {
+            t->parent = NULL;
+            if (t->state == TASK_ZOMBIE && t->resources_freed) {
+                free_task_struct(t);   // finished earlier, never waited for
+            }
+        }
+        t = next;
+    }
+    current->state = TASK_ZOMBIE;   // stack + memory freed by finish_switch() in the next task
+    if (current->parent != NULL) {
+        wait_queue_wake_all(&current->parent->children_wq);
+    }
     schedule();
     panic("task_exit: zombie task ran again");
 }
@@ -425,6 +449,33 @@ bool task_exists(uint64_t id) {
     }
     cpu_irq_restore(was_enabled);
     return found;
+}
+
+int64_t task_wait(uint64_t pid, int *exit_code) {
+    bool was_enabled = cpu_irq_save();
+    for (;;) {
+        struct task *child = NULL;
+        for (struct task *t = all_tasks; t != NULL; t = t->all_next) {
+            if (t->id == pid && t->parent == current) {
+                child = t;
+                break;
+            }
+        }
+        if (child == NULL) {
+            cpu_irq_restore(was_enabled);
+            return -1;   // not our child (or already waited for)
+        }
+        if (child->state == TASK_ZOMBIE && child->resources_freed) {
+            if (exit_code != NULL) {
+                *exit_code = child->exit_code;
+            }
+            free_task_struct(child);
+            cpu_irq_restore(was_enabled);
+            return (int64_t)pid;
+        }
+        // Sleep until one of our children exits, then look again.
+        wait_queue_sleep(&current->children_wq);
+    }
 }
 
 const char *task_state_name(enum task_state s) {

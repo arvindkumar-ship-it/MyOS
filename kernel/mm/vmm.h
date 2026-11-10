@@ -38,6 +38,7 @@
 #define PTE_ADDR_MASK 0x000FFFFFFFFFF000ul
 
 // Virtual memory regions.
+#define VIRT_KERNEL_HALF  0xffff800000000000ul   // PML4 entries 256-511
 #define VIRT_HEAP_START   0xffffc00000000000ul
 #define VIRT_HEAP_MAX     (1ul << 30)
 #define VIRT_STACKS_START 0xffffd00000000000ul

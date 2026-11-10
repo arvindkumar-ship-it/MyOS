@@ -8,6 +8,9 @@
 #include "mm/vmm.h"
 #include "drivers/pit.h"
 #include "fs/vfs.h"
+#include "proc/process.h"
+#include "proc/elf.h"
+#include "mm/heap.h"
 #include "mm/memory.h"
 #include "lib/kprintf.h"
 #include "arch/x86_64/cpu.h"
@@ -133,9 +136,80 @@ static int64_t sys_close(uint64_t fd) {
     return 0;
 }
 
+// spawn(path, argv): argv is a user array of user string pointers, ended by NULL.
+// Everything is copied into one kernel buffer before the new process is built.
+#define SPAWN_STRINGS 2048
+
+static int64_t sys_spawn(uint64_t user_path, uint64_t user_argv) {
+    char path[256];
+    int64_t len = copy_user_string(user_path, path, sizeof(path));
+    if (len < 0) {
+        return len;
+    }
+    char *strings = kmalloc(SPAWN_STRINGS);
+    if (strings == NULL) {
+        return -ENOMEM;
+    }
+    const char *argv[ELF_MAX_ARGS];
+    int argc = 0;
+    uint64_t used = 0;
+    int64_t result = 0;
+    for (;; argc++) {
+        uint64_t slot = user_argv + (uint64_t)argc * 8;
+        if (!user_ok(slot, 8, false)) {
+            result = -EFAULT;
+            break;
+        }
+        uint64_t user_str = *(const uint64_t *)slot;
+        if (user_str == 0) {
+            break;   // end of argv
+        }
+        if (argc == ELF_MAX_ARGS) {
+            result = -E2BIG;
+            break;
+        }
+        int64_t n = copy_user_string(user_str, strings + used, SPAWN_STRINGS - used);
+        if (n < 0) {
+            result = n == -ENAMETOOLONG ? -E2BIG : n;
+            break;
+        }
+        argv[argc] = strings + used;
+        used += (uint64_t)n + 1;
+    }
+    if (result == 0) {
+        const char *error;
+        struct task *child = process_spawn_elf(path, argc, argv, task_current(), &error);
+        if (child == NULL) {
+            result = vfs_lookup(path) == NULL ? -ENOENT : -ENOEXEC;
+        } else {
+            result = (int64_t)child->id;
+        }
+    }
+    kfree(strings);
+    return result;
+}
+
+static int64_t sys_wait(uint64_t pid, uint64_t user_status) {
+    if (user_status != 0 && !user_ok(user_status, sizeof(int), true)) {
+        return -EFAULT;
+    }
+    int code = 0;
+    int64_t r = task_wait(pid, &code);
+    if (r < 0) {
+        return -ECHILD;
+    }
+    if (user_status != 0) {
+        *(int *)user_status = code;
+    }
+    return r;
+}
+
 static int64_t sys_exit(uint64_t code) {
     struct task *t = task_current();
-    kprintf("[process '%s' (pid %lu) exited with code %ld]\n", t->name, t->id, (int64_t)code);
+    // Processes started by the kernel are announced; a shell's children are quiet.
+    if (t->parent == NULL) {
+        kprintf("[process '%s' (pid %lu) exited with code %ld]\n", t->name, t->id, (int64_t)code);
+    }
     task_exit((int)code);
 }
 
@@ -152,6 +226,8 @@ int64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
     case SYS_UPTIME: return (int64_t)pit_uptime_ms();
     case SYS_OPEN:   return sys_open(a1, a2);
     case SYS_CLOSE:  return sys_close(a1);
+    case SYS_SPAWN:  return sys_spawn(a1, a2);
+    case SYS_WAIT:   return sys_wait(a1, a2);
     default:         return -ENOSYS;
     }
 }

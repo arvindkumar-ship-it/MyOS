@@ -21,6 +21,13 @@
 // Returns the new task, or NULL if out of memory.
 struct task *process_spawn_flat(const char *name, const void *image, size_t size);
 
+// Start a user process from an ELF file in the VFS (e.g. "/bin/hello") with
+// arguments argv[0..argc-1]. "parent": the task that will wait() for it, or
+// NULL. A user parent passes on its fds 0-2; otherwise they are /dev/console.
+// Returns the task, or NULL with *error set.
+struct task *process_spawn_elf(const char *path, int argc, const char *const *argv,
+                               struct task *parent, const char **error);
+
 // Copy "len" bytes into another address space at "virt" (pages must be mapped).
 // Goes through the HHDM, so it works whatever CR3 currently holds.
 void process_copy_to(struct address_space *as, uint64_t virt, const void *src, size_t len);

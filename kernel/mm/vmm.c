@@ -119,7 +119,12 @@ uint64_t vmm_unmap_page(struct address_space *as, uint64_t virt) {
         phys = *pte & PTE_ADDR_MASK;
         *pte = 0;
         // The CPU may still have the old translation cached in its TLB.
-        if (is_current(as)) {
+        // Kernel-half addresses are mapped in EVERY address space (shared
+        // tables), so their TLB entry must go even when "as" is not the one
+        // in CR3 right now (e.g. freeing a kernel stack while a user process
+        // runs). Missing this once made a reused stack slot write into an
+        // already freed physical page.
+        if (is_current(as) || virt >= VIRT_KERNEL_HALF) {
             cpu_invlpg(virt);
         }
     }

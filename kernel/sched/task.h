@@ -12,6 +12,15 @@ struct file;
 // A task = one thread of execution with its own kernel stack.
 // (Stage 7 adds user processes: a task with its own address space.)
 
+struct task;
+
+// A list of tasks blocked until some event (see wait_queue_sleep below).
+struct wait_queue {
+    struct task *head;
+};
+
+#define WAIT_QUEUE_INIT { .head = 0 }
+
 enum task_state {
     TASK_READY,      // waiting in the run queue for the CPU
     TASK_RUNNING,    // on the CPU right now
@@ -37,6 +46,10 @@ struct task {
     uint64_t user_stack_top;      // user mode: initial stack pointer
 
     struct file *fds[TASK_MAX_FDS];   // open files (user processes)
+
+    struct task *parent;          // waits for us with task_wait() (NULL: nobody)
+    struct wait_queue children_wq;   // we sleep here in task_wait() until a child exits
+    bool resources_freed;         // zombie: stack + address space already given back
 
     uint64_t wake_tick;           // TASK_SLEEPING: wake up at this pit_ticks() value
     uint64_t ticks_used;          // timer ticks spent running (for ps)
@@ -85,12 +98,6 @@ void task_exit(int code);
 
 // --- Wait queues: block a task until some event happens. ---
 
-struct wait_queue {
-    struct task *head;
-};
-
-#define WAIT_QUEUE_INIT { .head = 0 }
-
 // Block the current task on wq until wait_queue_wake_all(wq).
 // Must be called with interrupts DISABLED (so the event cannot happen between
 // checking the condition and going to sleep); they are disabled again on return.
@@ -105,6 +112,10 @@ void wait_queue_wake_all(struct wait_queue *wq);
 void task_for_each(void (*fn)(struct task *t, void *ctx), void *ctx);
 
 const char *task_state_name(enum task_state s);
+
+// Wait until child "pid" exits; store its exit code. Frees the child's task.
+// Returns pid, or -1 if pid is not a child of the current task.
+int64_t task_wait(uint64_t pid, int *exit_code);
 
 // True while a task with this id exists (also as a zombie not yet freed).
 bool task_exists(uint64_t id);

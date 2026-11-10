@@ -323,6 +323,46 @@ TESTS = [
         ("expect", "TEST PASS: ata"),
     ], forbid=[PANIC_RE], exit=3),
 
+    # Stage 9 Done test: a separately compiled program runs from the initrd.
+    dict(name="elf_hello", steps=[
+        ("expect_re", r"Hello from an ELF program! \(pid \d+\)"),
+        ("expect", "argc = 3"),
+        ("expect", 'argv[0] = "/bin/hello"'),
+        ("expect", 'argv[1] = "first"'),
+        ("expect", 'argv[2] = "second arg"'),
+        ("expect", "kernel: /bin/hello exited with code 0"),
+        ("expect", "TEST PASS: elf_hello"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="spawn", steps=[
+        ('expect', 'argv[2] = "two words"'),
+        ("expect_re", r"spawntest: /bin/hello \(pid \d+\) finished, wait\(\) = \d+, exit code 0"),
+        ("expect_re", r"spawntest: /bin/exitcode \(pid \d+\) finished, wait\(\) = \d+, exit code 42"),
+        ("expect", "segv: writing to NULL..."),
+        ("expect_re", r"\[process 'segv' \(pid \d+\) killed: Page fault"),
+        ("expect_re", r"spawntest: /bin/segv \(pid \d+\) finished, wait\(\) = \d+, exit code 142"),
+        ("expect", "spawn of a missing file = -2 (expected -2)"),
+        ("expect", "spawn of a text file = -8 (expected -8)"),
+        ("expect", "wait for a non-child = -10 (expected -10)"),
+        ("expect", "spawntest: all ok"),
+        ("expect", "kernel: spawntest exited with code 0"),
+        ("expect", "TEST PASS: spawn"),
+    ], forbid=[PANIC_RE, "segv: not reached"], exit=3),
+
+    dict(name="elf_bad", steps=[
+        ("expect", "text file: not an ELF file"),
+        ("expect", "cut after 40 bytes: not an ELF file"),
+        ("expect", "segment at a kernel address: segment outside user space"),
+        ("expect", "segment bigger than the file: segment outside user space or outside the file"),
+        ("expect", "entry point in rodata: entry point is not in an executable segment"),
+        ("expect", "TEST PASS: elf_bad"),
+    ], forbid=[PANIC_RE, "LOADED"], exit=3),
+
+    dict(name="elf_leak", steps=[
+        ("expect", "10 x spawn+wait: exit codes ok, page leak 0, heap leak 0"),
+        ("expect", "TEST PASS: elf_leak"),
+    ], forbid=[PANIC_RE], exit=3),
+
     dict(name="user_leak", steps=[
         ("expect", "20 processes: page leak 0, heap leak 0, page-table leak 0"),
         ("expect", "TEST PASS: user_leak"),

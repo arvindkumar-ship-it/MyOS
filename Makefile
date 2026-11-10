@@ -87,6 +87,23 @@ OBJS := $(C_SRCS:%.c=$(BUILD_DIR)/%.o) $(ASM_SRCS:%.asm=$(BUILD_DIR)/%.asm.o)
 USER_ASM_SRCS := $(wildcard user/asm/*.asm)
 USER_ASM_BINS := $(USER_ASM_SRCS:user/asm/%.asm=$(BUILD_DIR)/user/%.bin)
 
+# User programs in C (Stage 9): ELF executables linked with our small libc,
+# put into the initrd as /bin/<name>.
+# Same no-SSE rule as the kernel: the kernel does not save FPU/SSE registers
+# on a task switch, so user code must not use them either.
+USER_CFLAGS := -O2 -g -pipe -Wall -Wextra -std=gnu11 -ffreestanding \
+    -fno-stack-protector -fno-pie -fno-pic -fcf-protection=none \
+    -mno-sse -mno-mmx -mno-80387 -mno-red-zone
+USER_CPPFLAGS := -nostdinc -isystem $(GCC_INCLUDE) -I user/libc/include -I kernel/syscall -MMD -MP
+USER_LDFLAGS := -nostdlib -static -no-pie -Wl,-T,user/user.ld -Wl,-z,max-page-size=0x1000 \
+    -Wl,-z,noexecstack -Wl,--build-id=none
+
+LIBC_SRCS := $(wildcard user/libc/*.c)
+LIBC_OBJS := $(LIBC_SRCS:%.c=$(BUILD_DIR)/%.o) $(BUILD_DIR)/user/libc/crt0.asm.o
+LIBC      := $(BUILD_DIR)/user/libc.a
+USER_PROGS     := $(wildcard user/programs/*.c)
+USER_PROG_BINS := $(USER_PROGS:user/programs/%.c=$(BUILD_DIR)/user/bin/%)
+
 # initrd: everything under initrd/ packed as a USTAR tar archive. Limine loads
 # it into memory as a "module"; the kernel mounts it with tarfs (Stage 8).
 INITRD       := $(BUILD_DIR)/initrd.tar
@@ -149,6 +166,24 @@ $(BUILD_DIR)/user/%.bin: user/asm/%.asm user/include/syscall.inc user/include/li
 	@mkdir -p $(dir $@)
 	$(AS) -f bin -I user/include/ $< -o $@
 
+# User libc and C programs.
+$(BUILD_DIR)/user/%.o: user/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) $(USER_CPPFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/user/libc/crt0.asm.o: user/libc/crt0.asm
+	@mkdir -p $(dir $@)
+	$(AS) -f elf64 $< -o $@
+
+$(LIBC): $(LIBC_OBJS)
+	rm -f $@
+	ar rcs $@ $^
+
+# crt0 first (it has _start), then the program, then the library.
+$(BUILD_DIR)/user/bin/%: $(BUILD_DIR)/user/programs/%.o $(LIBC) user/user.ld
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) $(USER_LDFLAGS) $(BUILD_DIR)/user/libc/crt0.asm.o $< $(LIBC) -o $@
+
 # The kernel embeds the user programs with incbin, so they must exist first.
 $(BUILD_DIR)/kernel/proc/builtin_programs.asm.o: $(USER_ASM_BINS)
 
@@ -178,10 +213,11 @@ $(BUILD_DIR)/limine.conf: limine.conf $(CONFIG_STAMP)
 # The initrd is built from a staging folder (initrd/ plus generated files).
 # --format=ustar: the tar layout tarfs understands. Owner 0, sorted names:
 # the same files always give the same archive.
-$(INITRD): $(INITRD_FILES)
+$(INITRD): $(INITRD_FILES) $(USER_PROG_BINS)
 	rm -rf $(INITRD_ROOT)
-	mkdir -p $(INITRD_ROOT)
+	mkdir -p $(INITRD_ROOT)/bin
 	cp -r initrd/. $(INITRD_ROOT)/
+	cp $(USER_PROG_BINS) $(INITRD_ROOT)/bin/
 	tar --format=ustar --owner=0 --group=0 --sort=name -cf $@ -C $(INITRD_ROOT) .
 
 # FAT32 disk image: mformat -F makes a FAT32 volume over the whole image (no
@@ -248,3 +284,4 @@ distclean: clean
 
 # Header dependency files written by -MMD.
 -include $(OBJS:.o=.d)
+-include $(LIBC_SRCS:%.c=$(BUILD_DIR)/%.d) $(USER_PROGS:%.c=$(BUILD_DIR)/%.d)
