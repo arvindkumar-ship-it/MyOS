@@ -51,8 +51,10 @@ GCC_INCLUDE := $(shell $(CC) -print-file-name=include)
 # -mno-red-zone         interrupts would overwrite the 128-byte red zone below rsp
 # -mcmodel=kernel       code and data live in the top 2 GiB (0xffffffff80000000+)
 # -mno-sse -mno-mmx -mno-80387  never touch FPU/SIMD registers in the kernel
+# -fcf-protection=none  Ubuntu gcc adds Intel CET "endbr64" to every function by
+#                       default; our kernel does not enable CET, so leave it out
 CFLAGS := -g -O2 -pipe -Wall -Wextra -std=gnu11 \
-    -ffreestanding -fno-stack-protector -fno-stack-check \
+    -ffreestanding -fno-stack-protector -fno-stack-check -fcf-protection=none \
     -fno-pic -fno-pie -fno-common \
     -m64 -march=x86-64 -mno-red-zone -mcmodel=kernel \
     -mno-sse -mno-mmx -mno-80387
@@ -71,7 +73,9 @@ LDFLAGS := -nostdlib -static -no-pie \
 # -f elf64: 64-bit ELF object.  -g -F dwarf: debug info gdb can read.
 # -MD: like gcc -MMD, writes a .d file (here: so changing assets/font.psf rebuilds font.o).
 AS      := nasm
-ASFLAGS := -f elf64 -g -F dwarf -Wall
+# -w-reloc-*: do not warn about normal relocations between sections (e.g. a table
+# in .rodata holding addresses of code in .text); the linker resolves them.
+ASFLAGS := -f elf64 -g -F dwarf -Wall -w-reloc-abs-qword -w-reloc-rel-dword
 
 # Every .c and .asm file under kernel/ is built. build/ mirrors the source tree.
 # Assembly objects are named *.asm.o so foo.c and foo.asm can never clash.

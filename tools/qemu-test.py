@@ -65,6 +65,44 @@ TESTS = [
     # Stage 3: our GDT and TSS are loaded.
     dict(name="gdt", steps=[("expect", "GDT + TSS loaded"), ("expect", "cs=8 ss=10 ds=10 tr=28"),
                             ("expect", "TEST PASS: gdt")], forbid=[PANIC_RE], exit=3),
+
+    # Stage 3 Done test: 1/0 -> "Divide error at RIP=...", no reboot.
+    dict(name="div0", steps=[
+        ("expect", "IDT loaded"),
+        ("expect", "dividing by zero..."),
+        ("expect_re", r"Divide error at RIP=0xffffffff8[0-9a-f]{7}"),
+        ("expect", "unhandled CPU exception 0 (Divide error) in kernel mode"),
+    ], forbid=[r"not reached", r"MyOS booting\.\.\.[\s\S]*MyOS booting"], exit=5),
+
+    # Breakpoint returns, and iretq restores every register.
+    dict(name="int3", steps=[
+        ("expect_re", r"Breakpoint at RIP=0xffffffff8[0-9a-f]{7}"),
+        ("expect", "back from int3, registers preserved"),
+        ("expect", "TEST PASS: int3"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="gp", steps=[
+        ("expect", "General protection fault at RIP="),
+        ("expect", "selector error: GDT index 16 (selector 80)"),
+        ("expect", "unhandled CPU exception 13"),
+    ], forbid=[r"TEST PASS"], exit=5),
+
+    dict(name="pf", steps=[
+        ("expect", "Page fault at RIP="),
+        ("expect", "not-present page on read, kernel mode, address CR2=0x00000deadbeef000"),
+        ("expect", "unhandled CPU exception 14"),
+    ], forbid=[r"not reached"], exit=5),
+
+    dict(name="df", steps=[
+        ("expect", "Double fault"),
+        ("expect", "handler running on IST1 stack: yes"),
+        ("expect", "unhandled CPU exception 8"),
+    ], forbid=[r"not reached"], exit=5),
+
+    dict(name="ud", steps=[
+        ("expect", "Invalid opcode at RIP="),
+        ("expect", "unhandled CPU exception 6"),
+    ], forbid=[r"TEST PASS"], exit=5),
 ]
 
 # ---------------------------------------------------------------------------

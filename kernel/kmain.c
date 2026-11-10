@@ -10,6 +10,7 @@
 #include "lib/panic.h"
 #include "arch/x86_64/cpu.h"
 #include "arch/x86_64/gdt.h"
+#include "arch/x86_64/interrupts.h"
 #include "tests/ktest.h"
 
 // Kernel entry point. Limine jumps here in 64-bit long mode,
@@ -45,6 +46,8 @@ void kmain(void) {
     // Stage 3: our own GDT + TSS, then the IDT so CPU exceptions are caught.
     gdt_init();
     kprintf("GDT + TSS loaded\n");
+    interrupts_init();
+    kprintf("IDT loaded (256 vectors)\n");
 
     // Automatic tests (only when booted with "test=...").
     ktest_run();

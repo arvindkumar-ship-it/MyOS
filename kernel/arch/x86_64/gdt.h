@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 // Global Descriptor Table.
 //
@@ -42,6 +43,9 @@ struct tss {
 
 // Build and load our GDT and TSS, reload all segment registers.
 void gdt_init(void);
+
+// True if a VIRTUAL address lies inside the double fault (IST1) stack.
+bool gdt_on_double_fault_stack(uint64_t virt_addr);
 
 // Set the kernel stack the CPU switches to when an interrupt or exception
 // arrives while running in ring 3. (Each task gets its own, Stage 7.)

@@ -81,3 +81,8 @@ void gdt_init(void) {
 void tss_set_rsp0(uint64_t virt_stack_top) {
     tss.rsp[0] = virt_stack_top;
 }
+
+bool gdt_on_double_fault_stack(uint64_t virt_addr) {
+    uint64_t bottom = (uint64_t)double_fault_stack;
+    return virt_addr >= bottom && virt_addr < bottom + sizeof(double_fault_stack);
+}

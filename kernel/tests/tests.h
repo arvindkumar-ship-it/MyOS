@@ -10,9 +10,21 @@ void test_panic(void);
 
 // Stage 3
 void test_gdt(void);
+void test_div0(void);
+void test_int3(void);
+void test_gp(void);
+void test_pf(void);
+void test_df(void);
+void test_ud(void);
 
 #define KTEST_LIST \
     { "boot",    test_boot }, \
     { "kprintf", test_kprintf }, \
     { "panic",   test_panic }, \
-    { "gdt",     test_gdt },
+    { "gdt",     test_gdt }, \
+    { "div0",    test_div0 }, \
+    { "int3",    test_int3 }, \
+    { "gp",      test_gp }, \
+    { "pf",      test_pf }, \
+    { "df",      test_df }, \
+    { "ud",      test_ud },
