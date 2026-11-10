@@ -167,3 +167,119 @@ void test_null(void) {
     kprintf("not reached: %lx\n", value);
     ktest_finish(false);
 }
+
+// ---------------------------------------------------------------------------
+// Heap
+// ---------------------------------------------------------------------------
+
+#include "mm/heap.h"
+
+#define HEAP_SLOTS 500
+#define HEAP_ROUNDS 5000
+
+static uint8_t *slot_ptr[HEAP_SLOTS];
+static uint32_t slot_size[HEAP_SLOTS];
+
+// Small pseudo random number generator (xorshift), so the test is repeatable.
+static uint64_t rng_state = 0x9E3779B97F4A7C15ul;
+static uint64_t rng(void) {
+    rng_state ^= rng_state << 13;
+    rng_state ^= rng_state >> 7;
+    rng_state ^= rng_state << 17;
+    return rng_state;
+}
+
+static bool slot_intact(int i) {
+    for (uint32_t j = 0; j < slot_size[i]; j++) {
+        if (slot_ptr[i][j] != (uint8_t)i) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void test_heap(void) {
+    struct heap_stats start = heap_get_stats();
+
+    // Random kmalloc/kfree. Every block is filled with its slot number, and
+    // checked before it is freed: two blocks overlapping would break this.
+    for (int round = 0; round < HEAP_ROUNDS; round++) {
+        int i = (int)(rng() % HEAP_SLOTS);
+        if (slot_ptr[i] != NULL) {
+            if (!slot_intact(i)) {
+                kprintf("slot %d overwritten (overlapping blocks?)\n", i);
+                ktest_finish(false);
+            }
+            kfree(slot_ptr[i]);
+            slot_ptr[i] = NULL;
+        } else {
+            // Mostly small sizes, sometimes a big one.
+            uint32_t size = (rng() % 8 == 0) ? (uint32_t)(rng() % 65536) + 1
+                                             : (uint32_t)(rng() % 512) + 1;
+            uint8_t *p = kmalloc(size);
+            if (p == NULL || !IS_ALIGNED((uint64_t)p, 16)) {
+                kprintf("kmalloc(%u) returned %p\n", size, (void *)p);
+                ktest_finish(false);
+            }
+            memset(p, (uint8_t)i, size);
+            slot_ptr[i] = p;
+            slot_size[i] = size;
+        }
+    }
+    struct heap_stats mid = heap_get_stats();
+    kprintf("heap: after %d random ops: %lu live allocations, %lu KiB used, "
+            "%lu KiB mapped, %lu free blocks\n", HEAP_ROUNDS, mid.allocations,
+            mid.used_bytes / 1024, mid.mapped_bytes / 1024, mid.free_blocks);
+
+    for (int i = 0; i < HEAP_SLOTS; i++) {
+        if (slot_ptr[i] != NULL) {
+            if (!slot_intact(i)) {
+                kprintf("slot %d overwritten\n", i);
+                ktest_finish(false);
+            }
+            kfree(slot_ptr[i]);
+            slot_ptr[i] = NULL;
+        }
+    }
+
+    struct heap_stats end = heap_get_stats();
+    bool check = heap_check();
+    kprintf("heap: all freed: %lu allocations, %lu bytes used, %lu free block(s), heap_check %s\n",
+            end.allocations, end.used_bytes, end.free_blocks, check ? "ok" : "FAILED");
+
+    // Everything merged back into one block: a request for all of it must
+    // succeed without growing the heap.
+    uint64_t mapped = end.mapped_bytes;
+    void *all = kmalloc(end.largest_free);
+    bool reused = all != NULL && heap_get_stats().mapped_bytes == mapped;
+    kfree(all);
+    kprintf("heap: one kmalloc of the whole free block (%lu KiB): %s\n",
+            end.largest_free / 1024, reused ? "ok, no growth" : "FAILED");
+
+    // Something bigger than the heap: it must grow.
+    void *big = kmalloc(3 * 1024 * 1024);
+    bool grew = big != NULL && heap_get_stats().mapped_bytes > mapped;
+    kfree(big);
+    kprintf("heap: 3 MiB kmalloc %s\n", grew ? "grew the heap" : "FAILED");
+
+    ktest_finish(check && end.allocations == start.allocations && end.used_bytes == start.used_bytes
+                 && end.free_blocks == 1 && reused && grew && heap_check());
+}
+
+void test_heap_double_free(void) {
+    void *p = kmalloc(100);
+    kfree(p);
+    kprintf("freeing %p again...\n", p);
+    kfree(p);
+    ktest_finish(false);
+}
+
+// Writing past the end of a block destroys the next block's header.
+void test_heap_overflow(void) {
+    uint8_t *a = kmalloc(32);
+    uint8_t *b = kmalloc(32);
+    kprintf("writing 64 bytes into a 32 byte block...\n");
+    memset(a, 'X', 64);
+    kfree(b);
+    ktest_finish(false);
+}

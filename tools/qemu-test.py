@@ -173,6 +173,22 @@ TESTS = [
     dict(name="null", steps=[
         ("expect", "not-present page on read, kernel mode, address CR2=0x0000000000000000"),
     ], forbid=[r"not reached"], exit=5),
+
+    # Heap: random kmalloc/kfree, everything merges back into one free block.
+    dict(name="heap", steps=[
+        ("expect", "heap: free-list allocator"),
+        ("expect", "heap: after 5000 random ops"),
+        ("expect", "heap: all freed: 0 allocations, 0 bytes used, 1 free block(s), heap_check ok"),
+        ("expect", "ok, no growth"),
+        ("expect", "3 MiB kmalloc grew the heap"),
+        ("expect", "TEST PASS: heap"),
+    ], forbid=[PANIC_RE], exit=3),
+
+    dict(name="heap_double_free", steps=[("expect", "kfree: double free of 0xffffc000000000")],
+         forbid=[r"TEST PASS"], exit=5),
+
+    dict(name="heap_overflow", steps=[("expect", "has a bad header (magic 58585858)")],
+         forbid=[r"TEST PASS"], exit=5),
 ]
 
 # ---------------------------------------------------------------------------

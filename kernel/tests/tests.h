@@ -29,6 +29,9 @@ void test_vmm_unmapped(void);
 void test_nx(void);
 void test_wp(void);
 void test_null(void);
+void test_heap(void);
+void test_heap_double_free(void);
+void test_heap_overflow(void);
 
 #define KTEST_LIST \
     { "boot",    test_boot }, \
@@ -50,4 +53,7 @@ void test_null(void);
     { "vmm_unmapped", test_vmm_unmapped }, \
     { "nx",      test_nx }, \
     { "wp",      test_wp }, \
-    { "null",    test_null },
+    { "null",    test_null }, \
+    { "heap",    test_heap }, \
+    { "heap_double_free", test_heap_double_free }, \
+    { "heap_overflow", test_heap_overflow },
