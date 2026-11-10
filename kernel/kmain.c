@@ -4,6 +4,7 @@
 #include <limine.h>
 
 #include "drivers/serial.h"
+#include "drivers/framebuffer.h"
 
 // ---------------------------------------------------------------------------
 // Limine requests
@@ -41,29 +42,6 @@ static void hcf(void) {
     }
 }
 
-// Pack 8-bit red/green/blue into one pixel, using the layout the framebuffer reports.
-static uint32_t fb_pixel(struct limine_framebuffer *fb, uint8_t r, uint8_t g, uint8_t b) {
-    return ((uint32_t)r << fb->red_mask_shift)
-         | ((uint32_t)g << fb->green_mask_shift)
-         | ((uint32_t)b << fb->blue_mask_shift);
-}
-
-// Draw a blue/green gradient so we can see the kernel really ran.
-static void fb_draw_test_pattern(struct limine_framebuffer *fb) {
-    // fb->address is a VIRTUAL address (Limine already mapped the framebuffer for us).
-    volatile uint32_t *virt_fb = fb->address;
-    // pitch = bytes per row. It can be bigger than width * 4, so always use it.
-    size_t pixels_per_row = fb->pitch / 4;
-
-    for (size_t y = 0; y < fb->height; y++) {
-        for (size_t x = 0; x < fb->width; x++) {
-            uint8_t blue  = (uint8_t)(x * 255 / fb->width);
-            uint8_t green = (uint8_t)(y * 255 / fb->height);
-            virt_fb[y * pixels_per_row + x] = fb_pixel(fb, 0, green, blue);
-        }
-    }
-}
-
 // Kernel entry point. Limine jumps here in 64-bit long mode,
 // with paging on and the kernel mapped at 0xffffffff80000000.
 void kmain(void) {
@@ -84,15 +62,15 @@ void kmain(void) {
         hcf();
     }
 
-    struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
-
-    // We only handle 32 bits-per-pixel RGB with 8-bit channels.
-    if (fb->memory_model != LIMINE_FRAMEBUFFER_RGB || fb->bpp != 32) {
-        serial_write("error: framebuffer is not 32-bit RGB\n");
+    if (!fb_init(framebuffer_request.response->framebuffers[0])) {
+        serial_write("error: framebuffer is not 32-bit RGB (8 bits per channel)\n");
         hcf();
     }
+    serial_write("framebuffer ready\n");
 
-    fb_draw_test_pattern(fb);
+    // Test: dark background and one white square in the corner.
+    fb_clear(fb_rgb(0x10, 0x10, 0x30));
+    fb_fill_rect(20, 20, 100, 100, fb_rgb(0xFF, 0xFF, 0xFF));
 
     // Nothing more to do yet.
     hcf();
