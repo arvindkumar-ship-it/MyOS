@@ -12,9 +12,6 @@ void input_push(char c);
 // Take a character if one is waiting. Never blocks.
 bool input_try_getc(char *c);
 
-// Wait until a character arrives (sleeps the CPU with hlt). Needs interrupts on.
+// Wait until a character arrives. With the scheduler running the task blocks
+// (other tasks run); before that the CPU sleeps with hlt.
 char input_getc(void);
-
-// Optional hook run after every pushed character (Stage 6 uses it to wake up
-// a task waiting for input). Runs in IRQ context.
-void input_set_push_callback(void (*callback)(void));

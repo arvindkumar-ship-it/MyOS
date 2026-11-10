@@ -1,0 +1,379 @@
+#include "sched/task.h"
+
+#include <stddef.h>
+#include "mm/memory.h"
+#include "mm/heap.h"
+#include "mm/vmm.h"
+#include "drivers/pit.h"
+#include "lib/string.h"
+#include "lib/kprintf.h"
+#include "lib/panic.h"
+#include "arch/x86_64/cpu.h"
+
+// Round-robin scheduler for one CPU.
+//
+// Ready tasks wait in a FIFO run queue. The timer IRQ (100 Hz) counts down the
+// running task's time slice; at 0 the task goes to the back of the queue and
+// the first one in the queue gets the CPU (preemption). Tasks can also give up
+// the CPU themselves: yield, sleep, wait for an event, exit.
+//
+// All scheduler data is changed only with interrupts disabled. On one CPU that
+// is enough: nothing else can run while IF = 0.
+
+#define TIME_SLICE_TICKS 5     // 50 ms at 100 Hz
+#define MAX_KSTACKS      256
+#define KSTACK_SLOT      (64 * 1024)   // virtual space per stack: stack + unmapped guard below
+
+// In switch.asm.
+extern void switch_context(uint64_t *old_rsp_save, uint64_t new_rsp);
+extern void task_trampoline(void);
+
+static struct task *current;
+static struct task *idle_task;
+static struct task *run_head, *run_tail;   // run queue (READY tasks, FIFO)
+static struct task *sleep_list;            // SLEEPING tasks, sorted by wake_tick
+static struct task *all_tasks;
+static struct task *last_prev;             // task we just switched away from
+static uint64_t next_id;
+static uint64_t slice_left;
+static bool preemption;
+static bool running;
+static uint64_t switch_count;
+static bool kstack_slot_used[MAX_KSTACKS];
+
+// ---------------------------------------------------------------------------
+// Kernel stacks: each one sits at the top of a 64 KiB virtual slot. The pages
+// below it in the slot are never mapped, so running off the end of the stack
+// hits an unmapped "guard" page and faults instead of silently overwriting
+// another task's memory.
+// ---------------------------------------------------------------------------
+
+static bool kstack_alloc(struct task *t) {
+    for (int i = 0; i < MAX_KSTACKS; i++) {
+        if (kstack_slot_used[i]) {
+            continue;
+        }
+        uint64_t slot = VIRT_STACKS_START + (uint64_t)i * KSTACK_SLOT;
+        uint64_t bottom = slot + KSTACK_SLOT - KSTACK_SIZE;
+        if (!vmm_alloc_pages(vmm_kernel_space(), bottom, KSTACK_SIZE / PAGE_SIZE,
+                             PTE_WRITE | PTE_NX)) {
+            return false;
+        }
+        kstack_slot_used[i] = true;
+        t->virt_kstack_bottom = bottom;
+        t->virt_kstack_top = slot + KSTACK_SLOT;
+        return true;
+    }
+    return false;
+}
+
+static void kstack_free(struct task *t) {
+    if (t->virt_kstack_bottom == 0) {
+        return;   // boot stack (kmain): not ours to free
+    }
+    vmm_free_pages(vmm_kernel_space(), t->virt_kstack_bottom, KSTACK_SIZE / PAGE_SIZE);
+    kstack_slot_used[(t->virt_kstack_bottom - VIRT_STACKS_START) / KSTACK_SLOT] = false;
+}
+
+// ---------------------------------------------------------------------------
+// Queues (call with interrupts off)
+// ---------------------------------------------------------------------------
+
+static void run_queue_push(struct task *t) {
+    t->next = NULL;
+    if (run_tail != NULL) {
+        run_tail->next = t;
+    } else {
+        run_head = t;
+    }
+    run_tail = t;
+}
+
+static struct task *run_queue_pop(void) {
+    struct task *t = run_head;
+    if (t != NULL) {
+        run_head = t->next;
+        if (run_head == NULL) {
+            run_tail = NULL;
+        }
+        t->next = NULL;
+    }
+    return t;
+}
+
+static void make_ready(struct task *t) {
+    t->state = TASK_READY;
+    if (t != idle_task) {
+        run_queue_push(t);
+    }
+}
+
+// Free a finished task's stack and struct. Only for a task that is not running.
+static void reap(struct task *t) {
+    struct task **pp = &all_tasks;
+    while (*pp != NULL && *pp != t) {
+        pp = &(*pp)->all_next;
+    }
+    if (*pp == t) {
+        *pp = t->all_next;
+    }
+    kstack_free(t);
+    kfree(t);
+}
+
+// Runs right after every switch, on the NEW task's stack. The old task's
+// stack is not in use any more, so a finished task can be freed here (a task
+// can never free its own stack while it is still running on it).
+static void finish_switch(void) {
+    if (last_prev != NULL && last_prev->state == TASK_ZOMBIE) {
+        reap(last_prev);
+    }
+    last_prev = NULL;
+}
+
+// Pick the next task and switch to it. Interrupts must be off.
+static void schedule(void) {
+    if (cpu_interrupts_enabled()) {
+        panic("schedule() called with interrupts enabled");
+    }
+    struct task *prev = current;
+    if (prev->state == TASK_RUNNING) {
+        make_ready(prev);   // preempted or yielded: back of the queue
+    }
+
+    struct task *next = run_queue_pop();
+    if (next == NULL) {
+        next = idle_task;
+    }
+    slice_left = TIME_SLICE_TICKS;
+    if (next == prev) {
+        prev->state = TASK_RUNNING;
+        return;
+    }
+
+    next->state = TASK_RUNNING;
+    current = next;
+    switch_count++;
+    if (next->as != prev->as) {
+        vmm_switch(next->as);
+    }
+    last_prev = prev;
+    switch_context(&prev->saved_rsp, next->saved_rsp);
+
+    // We get here when some later schedule() switches back to "prev".
+    finish_switch();
+}
+
+// Timer IRQ, 100 times a second (interrupts are off in IRQ handlers).
+static void sched_tick(void) {
+    uint64_t now = pit_ticks();
+
+    // Wake sleepers whose time has come. The list is sorted, so we can stop
+    // at the first one that must sleep longer.
+    while (sleep_list != NULL && sleep_list->wake_tick <= now) {
+        struct task *t = sleep_list;
+        sleep_list = t->next;
+        make_ready(t);
+    }
+
+    current->ticks_used++;
+    if (!preemption) {
+        return;
+    }
+    // Idle gives way as soon as anyone is ready; others when the slice is used up.
+    if ((current == idle_task && run_head != NULL) || --slice_left == 0) {
+        schedule();
+    }
+}
+
+// C entry of every new task (called from task_trampoline in switch.asm).
+void task_entry(void (*fn)(void *), void *arg) __attribute__((noreturn));
+void task_entry(void (*fn)(void *), void *arg) {
+    finish_switch();
+    cpu_sti();   // we arrived here from schedule(), where interrupts were off
+    fn(arg);
+    task_exit(0);
+}
+
+static void idle_loop(void *arg) {
+    (void)arg;
+    for (;;) {
+        cpu_cli();
+        if (run_head != NULL) {
+            schedule();
+        }
+        // Atomic "enable interrupts and sleep": a wakeup IRQ cannot be missed.
+        asm volatile ("sti; hlt" ::: "memory");
+    }
+}
+
+static struct task *task_alloc(const char *name) {
+    struct task *t = kzalloc(sizeof(*t));
+    if (t == NULL) {
+        return NULL;
+    }
+    t->id = next_id++;
+    size_t i = 0;
+    for (; i < TASK_NAME_LEN - 1 && name[i] != '\0'; i++) {
+        t->name[i] = name[i];
+    }
+    t->name[i] = '\0';
+    t->as = vmm_kernel_space();
+    return t;
+}
+
+struct task *task_create(const char *name, void (*fn)(void *), void *arg) {
+    struct task *t = task_alloc(name);
+    if (t == NULL) {
+        return NULL;
+    }
+    if (!kstack_alloc(t)) {
+        kfree(t);
+        return NULL;
+    }
+
+    // Build the stack exactly as switch_context leaves it for a task that is
+    // not running, so the first switch to it "returns" into task_trampoline
+    // with r12 = fn and r13 = arg.
+    uint64_t *sp = (uint64_t *)t->virt_kstack_top;
+    *--sp = (uint64_t)task_trampoline;   // return address for switch_context's ret
+    *--sp = 0;                           // rbx
+    *--sp = 0;                           // rbp
+    *--sp = (uint64_t)fn;                // r12
+    *--sp = (uint64_t)arg;               // r13
+    *--sp = 0;                           // r14
+    *--sp = 0;                           // r15
+    t->saved_rsp = (uint64_t)sp;
+
+    bool was_enabled = cpu_irq_save();
+    t->all_next = all_tasks;
+    all_tasks = t;
+    make_ready(t);
+    cpu_irq_restore(was_enabled);
+    return t;
+}
+
+void sched_init(void) {
+    // The code running now (kmain, on Limine's boot stack) becomes task 0.
+    struct task *boot = task_alloc("kmain");
+    if (boot == NULL) {
+        panic("sched_init: out of memory");
+    }
+    boot->state = TASK_RUNNING;
+    boot->all_next = NULL;
+    all_tasks = boot;
+    current = boot;
+    slice_left = TIME_SLICE_TICKS;
+
+    // Idle task: runs only when nobody else is ready. It is never in the run queue.
+    idle_task = task_create("idle", idle_loop, NULL);
+    if (idle_task == NULL) {
+        panic("sched_init: cannot create idle task");
+    }
+    bool was_enabled = cpu_irq_save();
+    run_queue_pop();   // task_create queued it; idle is special
+    idle_task->state = TASK_READY;
+    cpu_irq_restore(was_enabled);
+
+    pit_set_tick_callback(sched_tick);
+    running = true;
+}
+
+void sched_start_preemption(void) {
+    preemption = true;
+}
+
+struct task *task_current(void) {
+    return current;
+}
+
+void task_yield(void) {
+    bool was_enabled = cpu_irq_save();
+    schedule();
+    cpu_irq_restore(was_enabled);
+}
+
+void task_sleep_ms(uint64_t ms) {
+    uint64_t ticks = (ms * PIT_HZ + 999) / 1000;   // round up
+    if (ticks == 0) {
+        ticks = 1;
+    }
+    bool was_enabled = cpu_irq_save();
+    current->wake_tick = pit_ticks() + ticks;
+    current->state = TASK_SLEEPING;
+    // Insert sorted by wake_tick, AFTER tasks with the same wake_tick: tasks
+    // that went to sleep first for the same moment also wake first (fair order).
+    struct task **pp = &sleep_list;
+    while (*pp != NULL && (*pp)->wake_tick <= current->wake_tick) {
+        pp = &(*pp)->next;
+    }
+    current->next = *pp;
+    *pp = current;
+    schedule();
+    cpu_irq_restore(was_enabled);
+}
+
+void task_exit(int code) {
+    cpu_cli();
+    if (current == idle_task || current->virt_kstack_bottom == 0) {
+        panic("task_exit: task '%s' must not exit", current->name);
+    }
+    current->exit_code = code;
+    current->state = TASK_ZOMBIE;   // freed by finish_switch() in the next task
+    schedule();
+    panic("task_exit: zombie task ran again");
+}
+
+void wait_queue_sleep(struct wait_queue *wq) {
+    if (cpu_interrupts_enabled()) {
+        panic("wait_queue_sleep: interrupts must be disabled");
+    }
+    current->state = TASK_BLOCKED;
+    current->next = NULL;
+    // Append at the end, so tasks are woken in the order they started waiting.
+    struct task **pp = &wq->head;
+    while (*pp != NULL) {
+        pp = &(*pp)->next;
+    }
+    *pp = current;
+    schedule();
+}
+
+void wait_queue_wake_all(struct wait_queue *wq) {
+    bool was_enabled = cpu_irq_save();
+    struct task *t = wq->head;
+    wq->head = NULL;
+    while (t != NULL) {
+        struct task *next = t->next;
+        make_ready(t);
+        t = next;
+    }
+    cpu_irq_restore(was_enabled);
+}
+
+void task_for_each(void (*fn)(struct task *t, void *ctx), void *ctx) {
+    bool was_enabled = cpu_irq_save();
+    for (struct task *t = all_tasks; t != NULL; t = t->all_next) {
+        fn(t, ctx);
+    }
+    cpu_irq_restore(was_enabled);
+}
+
+const char *task_state_name(enum task_state s) {
+    switch (s) {
+    case TASK_READY:    return "ready";
+    case TASK_RUNNING:  return "running";
+    case TASK_SLEEPING: return "sleeping";
+    case TASK_BLOCKED:  return "blocked";
+    case TASK_ZOMBIE:   return "zombie";
+    }
+    return "?";
+}
+
+uint64_t sched_switch_count(void) {
+    return switch_count;
+}
+
+bool sched_running(void) {
+    return running;
+}

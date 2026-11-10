@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include "arch/x86_64/idt.h"
 #include "arch/x86_64/gdt.h"
+#include "mm/vmm.h"
 #include "arch/x86_64/cpu.h"
 #include "lib/kprintf.h"
 #include "lib/panic.h"
@@ -101,6 +102,14 @@ static void exception_fatal(struct interrupt_frame *f) {
         kprintf("\nDouble fault (an exception happened while delivering another one)\n");
         kprintf("  handler running on IST1 stack: %s\n",
                 gdt_on_double_fault_stack((uint64_t)f) ? "yes" : "NO");
+        // Classic cause: a kernel stack overflowed into its guard page. The
+        // page fault cannot be delivered (the CPU would push the exception
+        // frame onto the same broken stack), so it becomes a double fault.
+        if (cpu_read_cr2() >= VIRT_STACKS_START && cpu_read_cr2() < VIRT_TEST_START
+            && f->rsp >= VIRT_STACKS_START && f->rsp < VIRT_TEST_START) {
+            kprintf("  kernel stack overflow: guard page hit at CR2=%p (RSP=%p)\n",
+                    (void *)cpu_read_cr2(), (void *)f->rsp);
+        }
         break;
     default:
         kprintf("\n%s at RIP=%p, error code %lx\n", name, (void *)f->rip, f->error_code);

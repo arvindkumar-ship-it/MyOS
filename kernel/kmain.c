@@ -18,28 +18,36 @@
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/heap.h"
+#include "sched/task.h"
 #include "tests/ktest.h"
 
-// Stage 4 demo: echo typed characters (keyboard or serial) and show the
-// tick counter in the status bar, updated once per second.
-__attribute__((noreturn))
-static void stage4_echo_loop(void) {
-    kprintf("Type something (keyboard or serial):\n");
-    uint64_t last_shown = (uint64_t)-1;
-    for (;;) {
-        uint64_t t = pit_ticks();
-        if (t / PIT_HZ != last_shown) {
-            last_shown = t / PIT_HZ;
-            char status[64];
-            ksnprintf(status, sizeof(status), "ticks: %lu  uptime: %lus ", t, last_shown);
-            console_set_status(status);
-        }
-        char c;
-        while (input_try_getc(&c)) {
-            kprintf("%c", c);
-        }
-        cpu_hlt();   // sleep until the next IRQ (timer, key, serial)
+// ---------------------------------------------------------------------------
+// Stage 6 demo threads
+// ---------------------------------------------------------------------------
+
+// Done test of Stage 6: "A" and "B" print in turns, each sleeping in between.
+static void letter_thread(void *arg) {
+    const char *letter = arg;
+    for (int i = 1; i <= 5; i++) {
+        kprintf("%s%d ", letter, i);
+        task_sleep_ms(200);
     }
+    kprintf("[%s done] ", letter);
+}
+
+// Echo typed characters. input_getc() blocks this task until a key arrives.
+static void echo_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        char c = input_getc();
+        kprintf("%c", c);
+    }
+}
+
+// Count tasks for the status bar.
+static void count_task(struct task *t, void *ctx) {
+    (void)t;
+    (*(int *)ctx)++;
 }
 
 // Kernel entry point. Limine jumps here in 64-bit long mode,
@@ -92,8 +100,28 @@ void kmain(void) {
     vmm_init();
     heap_init();
 
+    // Stage 6: kmain becomes task 0, the timer starts switching tasks.
+    sched_init();
+    sched_start_preemption();
+    kprintf("scheduler running (round robin, 50 ms time slice)\n");
+
     // Automatic tests (only when booted with "test=...").
     ktest_run();
 
-    stage4_echo_loop();
+    // Normal boot: the Stage 6 demo.
+    task_create("A", letter_thread, "A");
+    task_create("B", letter_thread, "B");
+    task_create("echo", echo_thread, NULL);
+
+    // kmain itself keeps the status bar up to date. It runs on Limine's boot
+    // stack, so it must never exit.
+    for (;;) {
+        int tasks = 0;
+        task_for_each(count_task, &tasks);
+        char status[80];
+        ksnprintf(status, sizeof(status), "tasks: %d  switches: %lu  uptime: %lus ",
+                  tasks, sched_switch_count(), pit_uptime_ms() / 1000);
+        console_set_status(status);
+        task_sleep_ms(1000);
+    }
 }
