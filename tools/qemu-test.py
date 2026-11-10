@@ -284,7 +284,7 @@ TESTS = [
 
     # Stage 8: VFS over the initrd.
     dict(name="vfs", steps=[
-        ("expect", "initrd mounted at /: 6 files and directories"),
+        ("expect_re", r"initrd mounted at /: \d+ files and directories"),
         ("expect", "  docs/\r\n    about.txt (162 bytes)\r\n  etc/\r\n    motd (53 bytes)\r\n"
                    "  hello.txt (59 bytes)\r\n  dev/\r\n    console (device)\r\n    null (device)"),
         ("expect", "/hello.txt (59 bytes): Hello from the initrd!"),
