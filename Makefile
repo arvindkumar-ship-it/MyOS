@@ -61,9 +61,16 @@ LDFLAGS := -nostdlib -static -no-pie \
     -Wl,--build-id=sha1 \
     -Wl,-T,linker.ld
 
-# Every .c file under kernel/ is compiled. build/ mirrors the source tree.
-SRCS := $(shell find kernel -name '*.c')
-OBJS := $(SRCS:%.c=$(BUILD_DIR)/%.o)
+# -f elf64: 64-bit ELF object.  -g -F dwarf: debug info gdb can read.
+# -MD: like gcc -MMD, writes a .d file (here: so changing assets/font.psf rebuilds font.o).
+AS      := nasm
+ASFLAGS := -f elf64 -g -F dwarf -Wall
+
+# Every .c and .asm file under kernel/ is built. build/ mirrors the source tree.
+# Assembly objects are named *.asm.o so foo.c and foo.asm can never clash.
+C_SRCS   := $(shell find kernel -name '*.c')
+ASM_SRCS := $(shell find kernel -name '*.asm')
+OBJS := $(C_SRCS:%.c=$(BUILD_DIR)/%.o) $(ASM_SRCS:%.asm=$(BUILD_DIR)/%.asm.o)
 
 # ---------------------------------------------------------------------------
 # QEMU (commands from docs/os-kernel-guide.md)
@@ -88,6 +95,11 @@ debug: $(ISO)
 $(BUILD_DIR)/%.o: %.c | $(LIMINE_H_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+# Assemble one NASM file.
+$(BUILD_DIR)/%.asm.o: %.asm
+	@mkdir -p $(dir $@)
+	$(AS) $(ASFLAGS) -MD $(@:.o=.d) $< -o $@
 
 # Link all objects into the kernel ELF, using our linker script.
 $(KERNEL): $(OBJS) linker.ld

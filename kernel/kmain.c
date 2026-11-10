@@ -5,6 +5,7 @@
 
 #include "drivers/serial.h"
 #include "drivers/framebuffer.h"
+#include "drivers/console.h"
 
 // ---------------------------------------------------------------------------
 // Limine requests
@@ -68,9 +69,13 @@ void kmain(void) {
     }
     serial_write("framebuffer ready\n");
 
-    // Test: dark background and one white square in the corner.
-    fb_clear(fb_rgb(0x10, 0x10, 0x30));
-    fb_fill_rect(20, 20, 100, 100, fb_rgb(0xFF, 0xFF, 0xFF));
+    if (!console_init()) {
+        serial_write("error: built-in font is not a valid PSF1 file\n");
+        hcf();
+    }
+    serial_write("console ready\n");
+
+    console_write("Hello from MyOS\n");
 
     // Nothing more to do yet.
     hcf();

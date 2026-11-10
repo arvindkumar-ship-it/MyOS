@@ -30,3 +30,6 @@ uint32_t fb_rgb(uint8_t r, uint8_t g, uint8_t b);
 void fb_put_pixel(uint64_t x, uint64_t y, uint32_t color);
 void fb_fill_rect(uint64_t x, uint64_t y, uint64_t w, uint64_t h, uint32_t color);
 void fb_clear(uint32_t color);
+
+// Move the whole picture up by "lines" pixel rows and fill the freed rows at the bottom.
+void fb_scroll_up(uint64_t lines, uint32_t fill_color);
